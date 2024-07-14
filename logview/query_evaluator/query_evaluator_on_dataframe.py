@@ -34,6 +34,7 @@ class QueryEvaluatorOnDataFrame(QueryEvaluator):
         QueryEvaluatorOnDataFrame._sanity_check(log)
         filtered_log = query.evaluate(log)
 
+        # print(f'Filtered log: {filtered_log}')
         # get the complement of the result as all case_ids not present in filtered_log but present in log
         unique_values = filtered_log[QueryEvaluatorOnDataFrame.case_id_glue].unique()
         is_valid_case_id = log[QueryEvaluatorOnDataFrame.case_id_glue].isin(unique_values)

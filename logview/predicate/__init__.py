@@ -26,8 +26,13 @@ from logview.predicate.lt_constant import LessThanConstant
 from logview.predicate.start_with import StartWith
 from logview.predicate.end_with import EndWith
 from logview.predicate.duration_within import DurationWithin
+from logview.predicate.sum_aggregate import SumAggregate
+from logview.predicate.count_aggregate import CountAggregate
+from logview.predicate.max_aggregate import MaxAggregate
+from logview.predicate.min_aggregate import MinAggregate
 
 
 __all__ = ['EqToConstant', 'NotEqToConstant', 'Query', 'Union',
            'GreaterEqualToConstant', 'LessEqualToConstant', 'GreaterThanConstant',
-           'LessThanConstant', 'StartWith', 'EndWith', 'DurationWithin']
+           'LessThanConstant', 'StartWith', 'EndWith', 'DurationWithin',
+           'SumAggregate', 'CountAggregate', 'MaxAggregate', 'MinAggregate']

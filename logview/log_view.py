@@ -59,8 +59,11 @@ class LogView:
         self.multi_result_sets_comparators[name] = multi_result_sets_comparator
 
     def evaluate_query(self, result_set_name: str, source_log: pd.DataFrame, query: Query) -> (pd.DataFrame, pd.DataFrame):
+    
         cache_id = (id(source_log), query.as_string())
+        
         if cache_id in self.query_cache:
+            
             evaluation = self.query_registry.get_evaluation(self.query_cache[cache_id])
             if evaluation['result_set'].name != result_set_name:
                 msg = (f"Ignoring the new name '{result_set_name}' since you are getting back an already computed "
@@ -68,6 +71,7 @@ class LogView:
                 warnings.warn(msg)
             return evaluation['result_set'], evaluation['complement_result_set']
         else:
+
             result_set, complement_result_set = self.query_evaluator.evaluate(source_log, query)
             result_set.name = result_set_name
             complement_result_set.name = f'complement_{result_set_name}'
