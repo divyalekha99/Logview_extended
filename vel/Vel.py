@@ -1,5 +1,5 @@
 from dash import jupyter_dash
-from dash import Dash, dash_table, dcc, html, Input, Output, callback
+from dash import Dash, dash_table, dcc, html, Input, Output, callback, State
 import pandas as pd 
 import pm4py
 
@@ -57,8 +57,34 @@ class Vel:
             page_current= 0,
             page_size= 10,
             ),
-            html.Div(id='datatable-interactivity-container')
+            html.Div(id='datatable-interactivity-container'),
+            html.Button('Update Columns', id='update-columns-button', n_clicks=0),
+            html.Div(id='update-status'),
+            dcc.Store(id='stored-selected-columns')
         ])
+
+        @app.callback(
+            Output('stored-selected-columns', 'data'),
+            Input('datatable-interactivity', 'selected_columns')
+        )
+        def store_selected_columns(selected_columns):
+            return selected_columns
+        
+        @app.callback(
+            Output('update-status', 'children'),
+            Input('update-columns-button', 'n_clicks'),
+            State('stored-selected-columns', 'data')
+        )
+        def update_column_names(n_clicks, selected_columns):
+            if n_clicks > 0 and selected_columns:
+                if len(selected_columns) >= 3:
+                    self.changeDefaultNames(selected_columns[0], selected_columns[1], selected_columns[2])
+                    return f"Updated Columns: CASE_ID_COL: {self.CASE_ID_COL}, TIMESTAMP_COL: {self.TIMESTAMP_COL}, ACTIVITY_COL: {self.ACTIVITY_COL}"
+                else:
+                    return "Please select at least 3 columns to update CASE_ID_COL, TIMESTAMP_COL, and ACTIVITY_COL."
+            return "No columns selected for update."
+
+        # ])
 
         @callback(
             Output('datatable-interactivity', 'style_data_conditional'),
@@ -71,7 +97,3 @@ class Vel:
             } for i in selected_columns]
         
         return app
-        # @callback(
-        #     Output('datatable-interactivity-container', "children"),
-        #     Input('datatable-interactivity', "derived_virtual_data"),
-        #     Input('datatable-interactivity', "derived_virtual_selected_rows"))
