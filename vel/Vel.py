@@ -6,8 +6,6 @@ import logview
 from logview.utils import LogViewBuilder
 from logview.predicate import *
 
-
-# notebooks/dataset/Road_Traffic_Fine_Management_Process.csv
 class Vel:
     def __init__(self, logName, fileType=".csv"):
         self.logPath = "/Users/divyalekhas/Documents/Masters/Internship/logview/notebooks/dataset/Road_Traffic_Fine_Management_Process.csv"
@@ -58,8 +56,7 @@ class Vel:
                         dcc.Dropdown(id='attribute-key', 
                                     options=[{'label': i, 'value': i} for i in self.df.columns]),
                         html.Label('Value:'),
-                        dcc.Dropdown(id='attribute-value')  # Placeholder, options will be set dynamically
-                    ])
+                        dcc.Dropdown(id='attribute-value')
             @callback(
                 Output('attribute-value', 'options'),
                 [Input('attribute-key', 'value')]
@@ -69,7 +66,7 @@ class Vel:
                 unique_values = self.df[selected_key].unique()
                 return [{'label': v, 'value': v} for v in unique_values]
             @callback(
-                Output('query-result', 'children'),  # Assuming you have a Div with id='query-result' to display the query result
+                Output('query-result', 'children'),  
                 [Input('attribute-value', 'value')]
             )
             def perform_query(selected_value):
@@ -152,7 +149,7 @@ class Vel:
         app.layout = html.Div([
             dcc.Dropdown(self.getPredicates(), id='pandas-dropdown-2'),
             # html.Div(id='pandas-output-container-2'),
-            html.Div(id='predicate-inputs'),  # Placeholder for dynamic inputs
+            html.Div(id='predicate-inputs'), 
             html.Div(id='predicate-output') 
         ])
 
