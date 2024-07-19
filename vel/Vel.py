@@ -2,6 +2,9 @@ from dash import jupyter_dash
 from dash import Dash, dash_table, dcc, html, Input, Output, callback, State
 import pandas as pd 
 import pm4py
+import logview
+from logview.utils import LogViewBuilder
+from logview.predicate import *
 
 
 # notebooks/dataset/Road_Traffic_Fine_Management_Process.csv
@@ -15,6 +18,8 @@ class Vel:
         self.df = pd.read_csv(self.logPath)
         self.df = self.df.sort_values([self.CASE_ID_COL, self.TIMESTAMP_COL], ignore_index=True)
         self.name = ""
+        self.predicate= ""
+        # self.predicates = []
 
     # path_to_log = "./dataset/Road_Traffic_Fine_Management_Process.csv"
     # df = pd.read_csv(path_to_log, dtype={'Resource': str, 'matricola': str}, parse_dates=[TIMESTAMP_COL])
@@ -30,11 +35,53 @@ class Vel:
         self.CASE_ID_COL = caseId
         self.TIMESTAMP_COL = timestamp
         self.ACTIVITY_COL = activity
+    
+    def initLogView(self):
+        self.log = pm4py.format_dataframe(self.df, case_id=self.CASE_ID_COL, activity_key=self.ACTIVITY_COL, timestamp_key=self.TIMESTAMP_COL)
+        self.log_view = LogViewBuilder.build_log_view(self.log)
+        return self.log_view
 
-    # def applyPredicate(self, predicate):
-    #     query_s = Query('rs_sum_up', SumAggregate('amount', group_by=['case:concept:name']))
+    # def runQuery(self, Qname, attribute, value):
+    #     if self.predicate == 'EqToConstant':
+    #         query = Query(Qname, EqToConstant(attribute, value))
+    #         result_set_query, complement_result_set_query = self.log_view.evaluate_query('rs_SCC', self.log, query)
+    #         return result_set_query, complement_result_set_query
 
-    def getNameApp(self):
+    def applyInputPredicate(self, value):
+        print("in")
+        result = html.Div([])
+        if value == 'EqToConstant':
+            self.predicate = 'EqToConstant'
+            print("inin")
+            result = html.Div([
+                        html.Label('Attribute Key:'),
+                        dcc.Dropdown(id='attribute-key', 
+                                    options=[{'label': i, 'value': i} for i in self.df.columns]),
+                        html.Label('Value:'),
+                        dcc.Dropdown(id='attribute-value')  # Placeholder, options will be set dynamically
+                    ])
+            @callback(
+                Output('attribute-value', 'options'),
+                [Input('attribute-key', 'value')]
+            )
+            def set_values_dropdown(selected_key):
+                print("in options")
+                unique_values = self.df[selected_key].unique()
+                return [{'label': v, 'value': v} for v in unique_values]
+            @callback(
+                Output('query-result', 'children'),  # Assuming you have a Div with id='query-result' to display the query result
+                [Input('attribute-value', 'value')]
+            )
+            def perform_query(selected_value):
+                    return result
+
+    def getPredicates(self):
+        self.predicates = logview.predicate.__all__
+        print(logview.predicate.__all__)
+        return self.predicates
+
+
+    def getLog(self):
         app = Dash(__name__)
 
         app.layout = html.Div([
@@ -75,6 +122,7 @@ class Vel:
             Input('update-columns-button', 'n_clicks'),
             State('stored-selected-columns', 'data')
         )
+        
         def update_column_names(n_clicks, selected_columns):
             if n_clicks > 0 and selected_columns:
                 if len(selected_columns) >= 3:
@@ -84,7 +132,6 @@ class Vel:
                     return "Please select at least 3 columns to update CASE_ID_COL, TIMESTAMP_COL, and ACTIVITY_COL."
             return "No columns selected for update."
 
-        # ])
 
         @callback(
             Output('datatable-interactivity', 'style_data_conditional'),
@@ -97,3 +144,80 @@ class Vel:
             } for i in selected_columns]
         
         return app
+    
+
+    def displayPredicates(self):
+
+        app = Dash(__name__)
+        app.layout = html.Div([
+            dcc.Dropdown(self.getPredicates(), id='pandas-dropdown-2'),
+            # html.Div(id='pandas-output-container-2'),
+            html.Div(id='predicate-inputs'),  # Placeholder for dynamic inputs
+            html.Div(id='predicate-output') 
+        ])
+
+        @callback(
+            Output('predicate-inputs', 'children'),
+            Input('pandas-dropdown-2', 'value')
+        )
+        def update_output(value):
+            print("calling")
+            return self.applyInputPredicate(value)
+            # return f'You have selected {value}'
+        
+        return app
+    
+    # def displayList(self):
+    # dynamic selction
+
+    # def getInputPredicate(self):
+
+    #     app = Dash(__name__)
+        
+    #     predicates = self.getPredicates()
+    #     app.layout = html.Div([
+    #     dcc.Dropdown(
+    #         id='predicate-selector',
+    #         options=[{'label': i, 'value': i} for i in predicates],
+    #         value=predicates[0]  # Default value
+    #     ),
+    #     html.Div(id='predicate-inputs'),  # Placeholder for dynamic inputs
+    #     html.Button('Apply Predicate', id='apply-predicate-btn'),
+    #     html.Div(id='predicate-output')  # Placeholder for output
+    #     ])
+    #     @app.callback(
+    #         Output('predicate-inputs', 'children'),
+    #         Input('predicate-selector', 'value')
+    #     )
+    #     def update_inputs(selected_predicate):
+    #         if selected_predicate == 'SumAggregate':
+    #             return html.Div([
+    #                 html.Label('Aggregate column:'),
+    #                 dcc.Input(id='amount-input', type='text'),
+    #                 html.Label('Group By:'),
+    #                 dcc.Input(id='group-by-input', type='text')
+    #             ])
+    #         
+    #         return html.Div([])  # Return an empty div for predicates without additional inputs
+    #     @app.callback(
+    #         Output('predicate-output', 'children'),
+    #         Input('apply-predicate-btn', 'n_clicks'),
+    #         State('predicate-selector', 'value'),
+    #         State('amount-input', 'value'),
+    #         State('group-by-input', 'value')
+    #     )
+    #     def apply_predicate(n_clicks, selected_predicate, amount, group_by):
+    #         if n_clicks is None:
+    #             return ''  # No action if button hasn't been clicked
+
+    #         if selected_predicate == 'SumAggregate':
+    #             return f'Applying {selected_predicate} with amount={amount} and group_by={group_by.split(",")}'
+    #         
+
+    #         return 'Predicate applied'
+
+    #     # if __name__ == '__main__':
+    #     #     app.run_server(debug=True)
+    #     return app
+
+
