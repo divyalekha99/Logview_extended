@@ -4,19 +4,9 @@ import pm4py
 import pandas as pd
 
 class SumAggregate(Predicate):
-    # def __init__(self, attribute_key: str):
-    #     self.attribute_key = attribute_key
 
-    # def evaluate(self, log: pd.DataFrame) -> pd.DataFrame:
-    #     grouped_sum = log.groupby(['Case ID','case:concept:name', 'concept:name', 'Activity'])[self.attribute_key].sum().reset_index()
-    #     return grouped_sum
-    
-
-    # def as_string(self) -> str:
-    #     return f'Sum({self.attribute_key})'
-# class SumAggregate:
-    def __init__(self, sum_column, group_by=None):
-        self.sum_column = sum_column
+    def __init__(self, attribute_key , group_by=None):
+        self.sum_column = attribute_key
         self.group_by = group_by or []
 
     def evaluate(self, log: pd.DataFrame) -> pd.DataFrame:

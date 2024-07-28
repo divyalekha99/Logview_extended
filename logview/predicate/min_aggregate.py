@@ -2,8 +2,8 @@ from logview.interfaces import Predicate
 import pandas as pd
 
 class MinAggregate(Predicate):
-    def __init__(self, min_column, group_by=None):
-        self.min_column = min_column
+    def __init__(self, attribute_key, group_by=None):
+        self.min_column = attribute_key
         self.group_by = group_by or []
 
     def evaluate(self, log: pd.DataFrame) -> pd.DataFrame:

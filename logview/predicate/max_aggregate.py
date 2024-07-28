@@ -3,8 +3,8 @@ import pandas as pd
 
 
 class MaxAggregate(Predicate):
-    def __init__(self, max_column, group_by=None):
-        self.max_column = max_column
+    def __init__(self, attribute_key, group_by=None):
+        self.max_column = attribute_key
         self.group_by = group_by or []
 
     def evaluate(self, log: pd.DataFrame) -> pd.DataFrame:

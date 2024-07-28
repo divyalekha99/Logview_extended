@@ -31,3 +31,4 @@ class DurationWithin(Predicate):
 
     def as_string(self) -> str:
         return f'(DurationWithin [{self.min_duration_seconds}, {self.max_duration_seconds}])'
+
