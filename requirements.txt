@@ -6,3 +6,5 @@ tabulate
 pytest
 dash==2.0.0
 jupyter-dash==0.4.0
+dash-bootstrap-components
+dash feffery-antd-components

@@ -11,7 +11,6 @@ class SumAggregate(Predicate):
 
     def evaluate(self, log: pd.DataFrame) -> pd.DataFrame:
         if self.group_by:
-            # Group by specified columns and sum
             return log.groupby(self.group_by)[self.sum_column].sum().reset_index()
         else:
             # Return a DataFrame with total sum if no group_by columns are specified

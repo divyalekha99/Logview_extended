@@ -19,3 +19,4 @@ class MinAggregate(Predicate):
             return f'Min of {self.min_column} grouped by {group_by_str}'
         else:
             return f'Min of {self.min_column}'
+ 
