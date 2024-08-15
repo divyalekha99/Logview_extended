@@ -1,0 +1,78 @@
+/* Body and Font Setup */
+body {
+    font-family: 'Plus Jakarta Sans', 'Noto Sans', sans-serif;
+    background-color: #bad2ea !important; /* Light blue background */
+    color: #fbfcfd;
+    margin: 70px !important;
+    padding: 0;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Header */
+header {
+    background-color: #ffffff;
+    border-bottom: 1px solid #dae9f6;
+    padding: 20px 40px;
+}
+
+header h2 {
+    color: #081621;
+    font-weight: 700;
+}
+
+/* Card Background */
+.card {
+    background-color: #ffffff;
+    border: none;
+    box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);
+    padding: 40px;
+    border-radius: 8px;
+}
+
+/* Tabs */
+.dash-tabs .nav-item .nav-link {
+    color: #2d77b4;
+}
+
+.dash-tabs .nav-item .nav-link.active {
+    border-color: #008cff;
+    color: #081621;
+}
+
+/* Input Fields */
+input, .form-control {
+    background-color: #eff5fb;
+    border: 1px solid #c2dbf0;
+    color: #081621;
+}
+
+input::placeholder {
+    color: #2d77b4;
+}
+
+/* Buttons */
+button, .btn {
+    border-radius: 4px;
+    font-weight: 700;
+}
+
+.btn-primary {
+    background-color: #008cff;
+    color: #eff5fb;
+}
+
+.btn-secondary {
+    background-color: #dae9f6;
+    color: #081621;
+}
+
+/* Footer */
+footer {
+    background-color: #ffffff;
+    padding: 20px 40px;
+    text-align: center;
+    color: #2d77b4;
+}
