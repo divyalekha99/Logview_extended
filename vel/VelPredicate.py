@@ -4,6 +4,7 @@ from logview.predicate import *
 from logview.utils import LogViewBuilder
 
 class VelPredicate:
+    result_sets = {}
 
     def get_predicate_args(predicate_class):
         init_signature = inspect.signature(predicate_class.__init__)
@@ -11,21 +12,32 @@ class VelPredicate:
         print(parameters)
         return parameters
     
+    def run_predicate(log_view, conditions, query_name):
+        """Evaluates the given conditions against the log and stores the results."""
+        print(f"Running predicates for query: {query_name}, conditions: {conditions}")
 
-    def run_predicate(log_view, log, conditions, query_name):
-        print(f"Running predicates for query: {query_name}")
-
+        # Retrieve query data based on the query name
         query_data = conditions.get(query_name)
-        
+
         if not query_data:
             print(f"No data found for query: {query_name}")
             return
 
         query_name_value = query_data.get('query_name', '')
+        label = query_data.get('label', '')
+        selected_log_name = query_data.get('source_log', '')
         condition_list = query_data.get('conditions', [])
         
         predicates = []
 
+        if isinstance(selected_log_name, list):
+            selected_log_name = selected_log_name[0]  # Handling if it's a list
+        selected_log_dataframe = log_view.result_set_name_cache.get(selected_log_name)
+
+        if selected_log_dataframe is None:
+            return (f"No log data found for the selected log: {selected_log_name}")  # Return an empty DataFrame if not found
+
+        # Create predicate instances based on user input
         for index, condition in enumerate(condition_list):
             predicate_class = condition.get('predicate_class')
             attribute_key = condition.get('attribute_key')
@@ -33,14 +45,7 @@ class VelPredicate:
             min_duration = condition.get('min_duration_seconds')
             max_duration = condition.get('max_duration_seconds')
 
-            print(f"Condition {index + 1}:")
-            print(f"Predicate: {predicate_class}")
-            print(f"Attribute Key: {attribute_key}")
-            print(f"Values: {values}")
-            print(f"Min Duration: {min_duration}")
-            print(f"Max Duration: {max_duration}")
-
-
+            # Instantiate the predicate based on the available arguments
             if attribute_key is not None and values is not None:
                 predicate_instance = predicate_class(attribute_key, values)
             elif min_duration is not None and max_duration is not None:
@@ -50,14 +55,43 @@ class VelPredicate:
 
             predicates.append(predicate_instance)
 
+        # Create a Query instance based on the query name and predicates
         query_instance = Query(query_name_value, predicates)
-        print(f"Query Instance: {query_instance}")
 
-        rs_no_p, comp_rs_no_p = log_view.evaluate_query(query_name_value, log, query_instance)
+        # Evaluate the query against the log data
+        rs_no_p, comp_rs_no_p = log_view.evaluate_query(f'rs_{query_name_value}', selected_log_dataframe, query_instance)
 
-        print(f"Results for Query: {rs_no_p}")
+        # Store the result sets in the result_sets dictionary (optional, for your use case)
+        VelPredicate.result_sets.update({
+            f'rs_{query_name_value}': rs_no_p,
+            f'comp_rs_{query_name_value}': comp_rs_no_p
+        })
 
-        return rs_no_p 
+        log_view.label_result_set(rs_no_p, label)
+        print(f"Applied label '{label}' to result set for query: {query_name}, and log{selected_log_name}") 
+        # Return the primary result set
+        # return VelPredicate.result_sets[f'rs_{query_name_value}'],
+        return rs_no_p
+
+    
+    def apply_label_to_result(log_view, query_name, label):
+        """Apply a label to the result set of a given query."""
+        result_set = VelPredicate.result_sets.get(f'rs_{query_name}')
+        if result_set is None:
+            print(f"No result set found for query: {query_name}")
+            return
+
+        # Apply the label to the result set using the log_view's labeling function
+        log_view.label_result_set(result_set, label)
+        print(f"Applied label '{label}' to result set for query: {query_name}")
+
+
+    @staticmethod
+    def get_summary(log_view):
+        """Fetches the summary of all registered queries using LogView's built-in method."""
+        return log_view.get_summary(verbose=False)
+
+
 
    # def run_predicate(predicate_class, log_view, log, args):
     #     predicate = args.get('predicate')

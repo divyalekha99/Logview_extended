@@ -5,8 +5,8 @@ body {
     color: #fbfcfd;
     margin: 70px !important;
     padding: 0;
-    height: 100vh;
-    display: flex;
+    /* height: 100vh; */
+    /* display: flex; */
     align-items: center;
     justify-content: center;
 }
@@ -14,7 +14,7 @@ body {
 /* Header */
 header {
     background-color: #ffffff;
-    border-bottom: 1px solid #dae9f6;
+    /* border-bottom: 1px solid #dae9f6; */
     padding: 20px 40px;
 }
 
@@ -35,11 +35,13 @@ header h2 {
 /* Tabs */
 .dash-tabs .nav-item .nav-link {
     color: #2d77b4;
+    /* justify-content: center; */
 }
 
 .dash-tabs .nav-item .nav-link.active {
     border-color: #008cff;
     color: #081621;
+    /* justify-content: center; */
 }
 
 /* Input Fields */
@@ -62,6 +64,9 @@ button, .btn {
 .btn-primary {
     background-color: #008cff;
     color: #eff5fb;
+    border-radius: 5px;
+    height: 40px;
+    font-size: small;
 }
 
 .btn-secondary {
@@ -69,10 +74,39 @@ button, .btn {
     color: #081621;
 }
 
-/* Footer */
-footer {
-    background-color: #ffffff;
-    padding: 20px 40px;
-    text-align: center;
-    color: #2d77b4;
+.custom-trash-button {
+    background-color: transparent;
+    border: none;
+    padding: 0px;
+    font-size: 16px;
+    cursor: pointer;
+    color: inherit;
 }
+
+.custom-trash-button:hover {
+    color: #5c636a;  /* Adjust the color as desired */
+    background-color: transparent; /* Ensures the background stays transparent */
+}
+.custom-separator {
+    margin-left: 20px; /* Add space between groups */
+}
+
+/* @keyframes loading {
+    0% {
+      background-position: -200px 0;
+    }
+    100% {
+      background-position: calc(200px + 100%) 0;
+    }
+  }
+  
+  .shadow-loading {
+    animation: loading 1.5s infinite;
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background-size: 200px 100%;
+    border-radius: 4px;
+  }
+  
+  .loading-placeholder {
+    height: 20px;
+    margin:
