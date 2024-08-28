@@ -408,7 +408,8 @@ class Vel:
         return {
             'key': f'tab-{index}',
             'label': f'Query {index + 1}',
-            'children': tab_content
+            'children': tab_content,
+            'closable': True
         }
 
     def Query_Builder_v5(self):
@@ -491,27 +492,37 @@ class Vel:
 
                             fac.AntdTabs(
                             id="tabs",
+                            type="editable-card",
                             items=[
                                 self.generate_query_tab(0)
                             ],
-                            defaultActiveKey='tab-0',
-                            className="mb-4"
-                            ),
-
-
-                            # Button to Add Queries
-                            dbc.Row([
-                                dbc.Col(
-                                    fac.AntdButton(
+                            tabBarRightExtraContent = fac.AntdButton(
                                         "Add Query", 
                                         id='add-query-button', 
                                         nClicks=0,
                                         type="dashed", 
                                         icon=fac.AntdIcon(icon="antd-plus")
                                     ), 
-                                    width=2, align='center'
-                                ),
-                            ], className="button-group justify-content-center my-3"),
+                            defaultActiveKey='tab-0',
+                            className="mb-4"
+                            ),
+
+                            
+
+
+                            # Button to Add Queries
+                            # dbc.Row([
+                            #     dbc.Col(
+                            #         fac.AntdButton(
+                            #             "Add Query", 
+                            #             id='add-query-button', 
+                            #             nClicks=0,
+                            #             type="dashed", 
+                            #             icon=fac.AntdIcon(icon="antd-plus")
+                            #         ), 
+                            #         width=2, align='center'
+                            #     ),
+                            # ], className="button-group justify-content-center my-3"),
                             
                             dcc.Store(id='qname_index', data=0),
                         ], className="card-content")
@@ -537,8 +548,8 @@ class Vel:
             return dash.no_update
 
         @app.callback(
-            Output('tabs', 'items'),
-            Output('tabs', 'defaultActiveKey'),
+            Output('tabs', 'items', allow_duplicate=True),
+            Output('tabs', 'defaultActiveKey', allow_duplicate=True),
             Input('add-query-button', 'nClicks'),
             State('tabs', 'items'),
             prevent_initial_call=True
@@ -564,6 +575,29 @@ class Vel:
         def update_query_index(active_tab_key):
             active_index = int(active_tab_key.split('-')[-1])
             return active_index
+        
+        @app.callback(
+            Output('tabs', 'items', allow_duplicate=True),
+            Output('tabs', 'defaultActiveKey', allow_duplicate=True),
+            Input('tabs', 'latestDeletePane'),
+            State('tabs', 'items'),
+            State('tabs', 'activeKey'),
+            prevent_initial_call=True
+        )
+        def delete_query_tab(latestDeletePane, current_tabs, activeKey):
+            if latestDeletePane is None:
+                raise dash.exceptions.PreventUpdate
+            
+            updated_tabs = [tab for tab in current_tabs if tab['key'] != latestDeletePane]
+
+            if latestDeletePane == activeKey:
+                new_active_key = updated_tabs[0]['key'] if updated_tabs else None
+            else:
+                new_active_key = dash.no_update
+
+            return updated_tabs, new_active_key
+
+
 
         @app.callback(
             [Output({'type': 'label-input-container', 'index': MATCH}, 'children', allow_duplicate=True),
@@ -594,7 +628,7 @@ class Vel:
         )
         def add_label(nSubmit, label_value, existing_labels, query_index):
             if label_value:
-                label_id = len(existing_labels)  # Incremental label ID
+                label_id = len(existing_labels)  
                 dcc.Store(id={'type': 'closecount-store', 'index': f"{query_index}-{label_id}"}, data=[]),
                 new_label = fac.AntdTag(
                     content=label_value,
@@ -604,8 +638,6 @@ class Vel:
                     style={'font-size': '14px', 'display': 'flex', 'align-items': 'center'}
                 )
                 existing_labels.append(new_label)
-                # Reset input field and show the add label button again
-                print(f"indices {query_index}-{label_id}")
 
                 return existing_labels, [], {}
             
@@ -613,46 +645,40 @@ class Vel:
         
 
         @app.callback(
-            Output({'type': 'closecount-store', 'index': MATCH}, 'data'),
-            Input({'type': 'label', 'index': MATCH}, 'closeCounts'),
-            )
-            
-        def update_close_count(close_counts):
-            if not close_counts or all(c is None for c in close_counts):
-                raise dash.exceptions.PreventUpdate
-
-            print("Close Counts storing: ", close_counts)
-            return close_counts
-
-
-
-        @app.callback(
-            Output({'type': 'label-container', 'index': MATCH}, 'children', allow_duplicate=True),
+            Output({'type': 'label-container', 'index': ALL}, 'children', allow_duplicate=True),
             Input({'type': 'label', 'index': ALL}, 'closeCounts'),
-            State({'type': 'label-container', 'index': MATCH}, 'children'),
+            State({'type': 'label-container', 'index': ALL}, 'children'),
             prevent_initial_call=True
         )
-        def remove_label(close_counts, children):
-
-            print("in Close Counts: ", close_counts)
+        def delete_label(closeCounts, existing_labels):
+           
             ctx = dash.callback_context
-            if not ctx.triggered:
-                raise dash.exceptions.PreventUpdate
+            triggered_id = ctx.triggered_id
+
+            if not triggered_id:
+                return dash.no_update
+
             
-            print("Close Counts: ", close_counts)
+            triggered_close_counts = ctx.triggered[0]['value']
 
-            triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
-            triggered_index = eval(triggered_id)['index']
+            
+            if triggered_close_counts is None or triggered_close_counts <= 0:
+                return dash.no_update  
 
-            updated_children = [
-                child for child in children
-                if child['props']['id']['index'] != triggered_index
-            ]
-
-            return updated_children
+            updated_label_lists = []
 
 
+            for container_children in existing_labels:
+                for i, child in enumerate(container_children):
+                    
+                    if 'id' in child['props'] and child['props']['id'] == triggered_id:
+                        print(f"Deleting label: {child['props']['content']} with ID: {child['props']['id']}")
+                        container_children.pop(i)  
+                        break  
 
+                updated_label_lists.append(container_children)
+
+            return updated_label_lists
 
 
 
@@ -1452,7 +1478,6 @@ class Vel:
         def update_label_container(labels, query_index):
             print("Labels:", labels)
 
-            # Extracting the content directly without flattening
             tag_values = [child['props']['content'] for child in labels]
 
             print("Tag values:", tag_values)
@@ -1489,7 +1514,7 @@ class Vel:
 
             # Show the skeleton while processing
             if n_clicks[0] > 0:
-                # Simulate processing or fetching data
+               
                 # result = VelPredicate.run_predicate(self.log_view, self.log, self.conditions, f'Query{query_index + 1}')
                 # VelPredicate.apply_label_to_result(self.log_view, result, label)
                 result = VelPredicate.run_predicate(self.log_view, self.conditions, f'Query{query_index + 1}')
@@ -1569,6 +1594,6 @@ class Vel:
         if app is None:
             raise ValueError("App is None, there is an issue with the Query_Builder_v5 method.")
         print(f"App is ready to run at : http://127.0.0.1:{constants.QUERYPORT}")
-        app.run_server(port=constants.QUERYPORT, open_browser=False, debug=True)
+        app.run_server(port=constants.QUERYPORT, open_browser=True, debug=True)
 
         
