@@ -31,6 +31,15 @@ class Vel:
         self.df = self.df.sort_values([self.CASE_ID_COL, self.TIMESTAMP_COL], ignore_index=True)
         self.initLogView()
         self.conditions = {}
+        self.num_cases = 0
+        self.num_events = 0
+        self.predicate_categories = {
+                "Activity-Based": ["StartWith", "EndWith"],
+                "Attribute-Based": ["EqToConstant", "NotEqToConstant"],
+                "Time-Based": ["DurationWithin"],
+                "Threshold-Based": ["GreaterEqualToConstant", "LessEqualToConstant", "GreaterThanConstant", "LessThanConstant"],
+                "Aggregate-Based": ["SumAggregate", "MaxAggregate", "MinAggregate"],
+            }
         # self.path = 'http://127.0.0.1:8051'
         # print("Dash App Running on: ", self.path)
 
@@ -242,37 +251,81 @@ class Vel:
         
         return available_logs
 
+    def generate_grouped_radio_options(self, predicate_categories):
+        # Dictionary containing descriptions for each predicate
+        predicate_descriptions = {
+            'EqToConstant': "Keeps cases that contain at least an event with the given attribute equal to a constant value.",
+            'NotEqToConstant': "Keeps cases that do not contain any event with the given attribute equal to a constant value.",
+            'GreaterEqualToConstant': "Keeps cases that contain at least an event with the given attribute greater than or equal to a constant value.",
+            'GreaterThanConstant': "Keeps cases that contain at least an event with the given attribute greater than a constant value.",
+            'LessEqualToConstant': "Keeps cases that contain at least an event with the given attribute lower than or equal to a constant value.",
+            'LessThanConstant': "Keeps cases that contain at least an event with the given attribute lower than a constant value.",
+            'StartWith': "Keeps cases starting with the specified activities.",
+            'EndWith': "Keeps cases ending with a given activity.",
+            'DurationWithin': "Keeps cases with durations within a specified range in seconds.",
+            'SumAggregate': "Sums the values of the specified attribute, grouping by the specified columns.",
+            'MaxAggregate': "Finds the maximum value of the specified attribute, grouping by the specified columns.",
+            'MinAggregate': "Finds the minimum value of the specified attribute, grouping by the specified columns."
+        }
+
+        options = []
+        for category, predicates in predicate_categories.items():
+
+            options.append({
+                'label': fac.AntdText(category, strong=True),
+                'value': f'{category}-header',
+                'disabled': True
+            })
+
+            for predicate in predicates:
+                options.append({
+                    'label': fac.AntdTooltip(
+                        title=predicate_descriptions.get(predicate, "No description available."),
+                        # color="#ffffff",  
+                        overlayStyle={
+                            'padding': '2px',  
+                            'fontSize': '15px',  
+                            'color': '#2c3e50',  
+                            'borderRadius': '10px',  
+                            'boxShadow': '0px 6px 10px rgba(0, 0, 0, 0.12)',  
+                            # 'backgroundImage': 'linear-gradient(135deg, #f8f9fa 10%, #ffffff 100%)',  
+                            'textShadow': '0.5px 0.5px 2px rgba(0, 0, 0, 0.05)'  
+                        },
+                        children=fac.AntdText(predicate, style={'color': '#081621'})  
+                    ),
+                    'value': predicate
+                })
+
+        return options
+
 
 
     def generate_query_tab(self, index):
         self.initialize_query(index)
 
+        radio_options = self.generate_grouped_radio_options(self.predicate_categories)
+
         # Tab content
         tab_content = html.Div([
             # Query Name Input
             dbc.Row([
-                dbc.Col(fac.AntdText('Query Name:', className="font-weight-bold"), width="auto", align="center"),
+                dbc.Col(fac.AntdText('Query Name:', className="font-weight-bold"), width=1, align="center"),
                 dbc.Col(fac.AntdInput(
                     id={'type': 'query_name', 'index': index},
                     placeholder='Enter a value', size='middle'),
-                    width=2),
+                    width= 1, align='start', style={'paddingLeft': '0vw', 'width': '11vw'}),
                 dbc.Col(
                     fac.AntdSpace(
                         [   
-                            fac.AntdTooltip(
                             fac.AntdText('Labels:', className="font-weight-bold"),
-                            id = "tooltip-label",
-                            title="Allows the user to assign a descriptive tag to a result set. ",  # Tooltip content
-                            color="#1890ff",  
-                            placement="top",  
-                            # arrowPointAtCenter=True, 
-                            ),
+
                             # Existing Labels Container
                             html.Div(id={'type': 'label-container', 'index': index},
                                      children=[],
-                                    style={'display': 'inline-flex', 'flex-wrap': 'wrap', 'gap': '5px'}),
+                                    style={'display': 'inline-flex', 'flex-wrap': 'wrap', 'gap': '5px', 'paddingRight': '2vw'}),
 
                             # Add Label Button
+                            fac.AntdTooltip(
                             fac.AntdButton(
                                 'Add Label',
                                 icon=fac.AntdIcon(icon='antd-plus'),
@@ -282,6 +335,22 @@ class Vel:
                                 id={'type': 'add-label-button', 'index': index},
                                 style={'display': 'inline-flex', 'marginLeft': '10px'}
                             ),
+                            id = "tooltip-label",
+                            title="Allows the user to assign a descriptive tag to a result set. Different result sets can be tagged with the same label ",  # Tooltip content
+                            # color="#ffffff",  # Pure white background with a gradient
+                                placement="top",  
+                                trigger="hover",
+                                overlayStyle={
+                                    'padding': '2px',  
+                                    'fontSize': '15px',  
+                                    'color': '#2c3e50',  
+                                    'borderRadius': '10px',  
+                                    'boxShadow': '0px 6px 10px rgba(0, 0, 0, 0.12)',  
+                                    # 'backgroundImage': 'linear-gradient(135deg, #f8f9fa 10%, #ffffff 100%)',  
+                                    'textShadow': '0.5px 0.5px 2px rgba(0, 0, 0, 0.05)'  
+                                },
+                            ),
+                            
 
                             # Label Input Container
                             html.Div(id={'type': 'label-input-container', 'index': index}, style={'display': 'inline-flex', 'marginLeft': '10px'}),
@@ -291,30 +360,37 @@ class Vel:
                         direction='horizontal',
                         style={'width': '100%', 'align-items': 'center'}
                     ),
-                    width=8, align='center'
-                ),
-            ], className="mb-3"),
+                    width=7, align='center',style={'paddingLeft': '7vw'},
+                )
+            ], className="mb-4 mt-4", align='center'),
 
             html.Div(id={'type': 'condition-container', 'index': index},
+                    style={'maxHeight': '30vh', 'overflowY': 'auto'},
                     children=[html.Div([
                         # Query Condition Inputs
                         dbc.Row([
-                            dbc.Col(fac.AntdText(f'Condition {0 + 1}:', className="font-weight-bold"), width="auto", align="center"),
-                            dbc.Col(fac.AntdRadioGroup(
-                                options=[{'label': f'{c}', 'value': c} for c in self.getPredicates()],
-                                id={'type': 'radios', 'index': f'{index}-{0}'},
-                                optionType='button'
-                            ), width=10),
-                        ], className="mb-3"),
+                            dbc.Col(fac.AntdText(f'Condition {0 + 1}:', className="font-weight-bold"), width=1, align="center", ),
+                            dbc.Col(
+                                fac.AntdRadioGroup(
+                                    options=radio_options,
+                                    id={'type': 'radios', 'index': f'{index}-{0}'},
+                                    optionType='button',
+                                    buttonStyle='solid',
+                                    style={'flexWrap': 'wrap',}
+                                ),className='radio-group-container',
+                                width=8, align='start' ,style={'paddingLeft': '0vw'}
+                            ),
+
+                        ], className="mb-4 mt-4"),
 
                         dbc.Row([
                             dbc.Col(html.Div(id={'type': 'predicate-info', 'index': f'{index}-{0}'}))
-                        ], className="mb-3"),
+                        ], className="mb-4 mt-4",align='center'),
 
                         # Additional Inputs for Each Condition
                         dbc.Row([
                             dbc.Col(html.Div(id={'type': 'Query_input', 'index': f'{index}-{0}'}))
-                        ], className="mb-3"),
+                        ], className="mb-4 mt-4"),
                     ])]),
 
             # Add/Remove Condition Buttons
@@ -331,43 +407,7 @@ class Vel:
                     ),
                     width="auto", align="center"
                 ),
-            ], className="mb-3"),
-
-            # Label Management Section
-
-            dbc.Row([
-                # dbc.Col(
-                #     fac.AntdSpace(
-                #         [   
-                #             fac.AntdText('Labels:', className="font-weight-bold"),
-
-                #             # Existing Labels Container
-                #             html.Div(id={'type': 'label-container', 'index': index},
-                #                      children=[],
-                #                     style={'display': 'inline-flex', 'flex-wrap': 'wrap', 'gap': '5px'}),
-
-                #             # Add Label Button
-                #             fac.AntdButton(
-                #                 'Add Label',
-                #                 icon=fac.AntdIcon(icon='antd-plus'),
-                #                 type='dashed',
-                #                 size='small',
-                #                 nClicks=0,
-                #                 id={'type': 'add-label-button', 'index': index},
-                #                 style={'display': 'inline-flex', 'marginLeft': '10px'}
-                #             ),
-
-                #             # Label Input Container
-                #             html.Div(id={'type': 'label-input-container', 'index': index}, style={'display': 'inline-flex', 'marginLeft': '10px'})
-                #         ],
-                #         direction='horizontal',
-                #         style={'width': '100%', 'align-items': 'center'}
-                #     ),
-                #     width=12
-                # ),
-            ], className="mb-3"),
-
-
+            ], className="mb-4 mt-4"),
 
             # Query Display Area
             dbc.Row([
@@ -377,7 +417,7 @@ class Vel:
                 dbc.Col(
                     dbc.Button(
                         [
-                            html.I(className="bi bi-play-fill", style={"marginRight": "8px"}),  # Bootstrap icon
+                            html.I(className="bi bi-play-fill", style={"marginRight": "8px"}),  
                             "Run Query"
                         ],
                         id={'type': 'submit', 'index': index},
@@ -386,23 +426,37 @@ class Vel:
                         className="btn-primary"),
                     width="auto", align="start"  # , style={'paddingBottom': '40px'}
                 )
-            ], className="mb-3", style={'marginTop': '50px'}),
+            ], className="mb-4 mt-4", style={'marginTop': '50px'}),
 
             fac.AntdSkeleton(
-                dbc.Row([
-                    dbc.Col(
-                        html.Div(id={'type': 'predicate_output', 'index': index}, style={'overflowX': 'auto'}))
-                ], className="mb-3"),
-                active=True,
-                paragraph={'rows': 7, 'width': '50%'},
+                    dbc.Row([
+                        dbc.Col(
+                            html.Div(
+                                id={'type': 'predicate_output', 'index': index}, 
+                                style={
+                                    'overflowX': 'auto',
+                                    'border': '2px dotted #d3d3d3', 
+                                    'padding': '10px',
+                                    'borderRadius': '5px',
+                                    'minHeight': '15vh'
+                                }
+                            )
+                        )
+                    ], className="mb-4 mt-4"),
+                    active=True,
+                    paragraph={'rows': 7, 'width': '50%'},
             ),
+
 
             # Hidden Store for Tracking Conditions
             dcc.Store(id={'type': 'condition-store', 'index': index}, data=0),
             dcc.Store(id={'type': 'qname-store', 'index': index}),
             dcc.Store(id={'type': 'label-store', 'index': index}, data=[]),
+            dcc.Store(id={'type': 'row-number-store', 'index': index}, data=10),
+            dcc.Store(id={'type': 'query-result', 'index': index}),
+
             
-        ])
+        ], style={'padding': '55px', 'maxHeight': '60vh'})
 
         # Return the tab item dictionary for AntdTabs
         return {
@@ -416,19 +470,22 @@ class Vel:
 
         app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP,"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css",
                 "https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css"])
-        
+
         app.layout = html.Div(
             style={
-            'backgroundColor': '#bad2ea',
-            'color': '#081621',
-            'padding': '20px'
+                'backgroundColor': '#bad2ea',
+                'color': '#081621',
+                # 'padding': '20px',
+                'display': 'flex',
+                # 'justifyContent': 'center',  # Centers the card horizontally
+                # 'alignItems': 'center',  # Centers the card vertically
+                'minHeight': '90vh',  # Ensures full viewport height
             },
-
             children=[
                 dbc.Card(
                     dbc.CardBody([
                         html.Div([
-                            # Header
+                            # Sticky Header
                             html.Header([
                                 dbc.Row([
                                     # Left side content (Icon and Title)
@@ -448,7 +505,7 @@ class Vel:
                                         ], align="center"),
                                         width="auto"
                                     ),
-                                    # Spacer column to push the "Show Summary" button to the right
+                                    
                                     dbc.Col(),
                                     # Right side content (Show Summary button)
                                     dbc.Col(
@@ -464,7 +521,14 @@ class Vel:
                                         ),
                                         width="auto", align="end"
                                     ),
-                                ], className="py-3 px-4 justify-content-between", style={'borderBottom': '3px solid #dae9f6'})
+                                ], className="py-3 px-4 justify-content-between", 
+                                style={
+                                    'borderBottom': '3px solid #dae9f6',
+                                    'position': 'sticky',
+                                    'top': '0',
+                                    'zIndex': '1000',  # Ensures it stays on top of other elements
+                                    'backgroundColor': 'white'
+                                })
                             ]),
 
                             # Drawer for Summary
@@ -478,60 +542,109 @@ class Vel:
                                     html.Div(id="summary-content")
                                 ]
                             ),
-
                             # AntdTabs for Queries
+                            fac.AntdTabs(
+                                id="tabs",
+                                type="editable-card",
+                                style={'paddingInline': '40px'},
+                                items=[
+                                    self.generate_query_tab(0)
+                                ],
+                                tabBarRightExtraContent=fac.AntdTooltip(
+                                    title="Add Query",
+                                    # color="#ffffff",
+                                    placement="top",
+                                    trigger="hover",
+                                    overlayStyle={
+                                        'padding': '2px',
+                                        'fontSize': '15px',
+                                        'color': '#2c3e50',
+                                        'borderRadius': '10px',
+                                        'boxShadow': '0px 6px 10px rgba(0, 0, 0, 0.12)',
+                                        # 'backgroundImage': 'linear-gradient(135deg, #f8f9fa 10%, #ffffff 100%)',
+                                        'textShadow': '0.5px 0.5px 2px rgba(0, 0, 0, 0.05)'
+                                    },
+                                    children=fac.AntdIcon(
+                                        id='add-query-button',
+                                        icon='antd-plus-circle-two-tone',
+                                        style={'fontSize': 20, 'cursor': 'pointer'},
+                                    )
+                                ),
+
+
+                            # # AntdTabs for Queries
                             # fac.AntdTabs(
-                            #     id="tabs",
-                            #     # type="editable-card",  # Allows dynamic add/remove
-                            #     children=[
-                            #         self.generate_query_tab(0)
-                            #     ],
-                            #     defaultActiveKey='tab-0',
-                            #     className="mb-4"
+                            # id="tabs",
+                            # type="editable-card",
+                            # style={'paddingInline': '40px'},
+                            # items=[
+                            #     self.generate_query_tab(0)
+                            # ],
+                            # tabBarRightExtraContent=fac.AntdTooltip(
+                            #     fac.AntdIcon(
+                            #         id='add-query-button',
+                            #         nClicks=0,
+                            #         icon='antd-plus-circle-two-tone',
+                            #         style={'fontSize': 20, 'cursor': 'pointer'},
+                            #     ),
+                            #     id = "tooltip-label",
+                            #     title="Add Query",
+                            #     color="#ffffff",  # Pure white background with a gradient
+                            #         placement="top",  
+                            #         trigger="hover",
+                            #         overlayStyle={
+                            #             'padding': '2px',  
+                            #             'fontSize': '15px',  
+                            #             'color': '#2c3e50',  
+                            #             'borderRadius': '10px',  
+                            #             'boxShadow': '0px 6px 10px rgba(0, 0, 0, 0.12)',  
+                            #             'backgroundImage': 'linear-gradient(135deg, #f8f9fa 10%, #ffffff 100%)',  
+                            #             'textShadow': '0.5px 0.5px 2px rgba(0, 0, 0, 0.05)'  
+                            #         },
                             # ),
 
-                            fac.AntdTabs(
-                            id="tabs",
-                            type="editable-card",
-                            items=[
-                                self.generate_query_tab(0)
-                            ],
-                            tabBarRightExtraContent = fac.AntdButton(
-                                        "Add Query", 
-                                        id='add-query-button', 
-                                        nClicks=0,
-                                        type="dashed", 
-                                        icon=fac.AntdIcon(icon="antd-plus")
-                                    ), 
-                            defaultActiveKey='tab-0',
-                            className="mb-4"
-                            ),
-
+                            # tabBarRightExtraContent = dbc.Button(
+                            #                 [
+                            #                 html.I(className="bi bi-plus-lg", style={'marginRight': '5px'}),
+                            #                 "Add Query",
+                            #                 ],
+                            #                 id='add-query-button',
+                            #                 color="primary",
+                            #                 n_clicks=0,
+                            #                 style={'marginLeft': 'auto'}
+                            #         ),
                             
-
-
-                            # Button to Add Queries
-                            # dbc.Row([
-                            #     dbc.Col(
-                            #         fac.AntdButton(
+                            # fac.AntdButton(
                             #             "Add Query", 
                             #             id='add-query-button', 
                             #             nClicks=0,
                             #             type="dashed", 
                             #             icon=fac.AntdIcon(icon="antd-plus")
                             #         ), 
-                            #         width=2, align='center'
-                            #     ),
-                            # ], className="button-group justify-content-center my-3"),
-                            
+                            defaultActiveKey='tab-0',
+                            className="mb-4"
+                            ),
+
                             dcc.Store(id='qname_index', data=0),
-                        ], className="card-content")
+
+                        ], className="card-content", style={})  # Internal scrolling
                     ]), 
                     className="mb-4", 
-                    style={'padding': '20px', 'margin': '20px', 'backgroundColor': 'white', 'boxShadow': '0 4px 8px 0 rgba(0,0,0,0.2)', 'borderRadius': '25px', 'opacity': '0.9'}
+                    style={
+                        'padding': '20px', 
+                        'margin': '10px auto',  # Reduced margin-top to bring it closer to the top
+                        'backgroundColor': 'white', 
+                        'boxShadow': '0 4px 8px 0 rgba(0,0,0,0.2)', 
+                        'borderRadius': '25px', 
+                        'opacity': '0.9',
+                        'maxHeight': '100%',  # Limit height to viewport height minus some margin
+                        # 'overflowY': 'hidden'  # Prevent overflow of the entire card
+                    }
                 )
             ]
         )
+
+
         self.initialize_query(0)
 
         @app.callback(
@@ -690,43 +803,64 @@ class Vel:
             prevent_initial_call=True
         )
         def display_summary(nClicks):
-
             summary_data = VelPredicate.get_summary(self.log_view)
 
             evaluations = summary_data['evaluations']
             queries = summary_data['queries']
 
-             
             timeline_items = [
-                {
+            {
                     'content': fac.AntdCard(
                         title=f"Query: {row['query']}",
                         children=[
-                            html.P(f"Source Log: {row['source_log']}", style={'margin': '2px 0'}),
-                            html.P(f"Result Set: {row['result_set']}", style={'margin': '2px 0'}),
-                            html.P(f"Labels: {row['labels']}", style={'margin': '2px 0'}),
-                            html.P(f"Predicates: {queries.loc[queries['query'] == row['query'], 'predicates'].values[0]}", style={'margin': '2px 0'}),
+                            dbc.Row([
+                                dbc.Col("Source Log: ", style={'fontWeight': 'bold', 'display': 'inline'}, width='auto'),
+                                dbc.Col(row['source_log'], style={'display': 'inline'}, width='auto')
+                            ], style={'marginBottom': '6px'}),
+                            dbc.Row([
+                                dbc.Col("Result Set: ", style={'fontWeight': 'bold', 'display': 'inline'}, width='auto'),
+                                dbc.Col(row['result_set'], style={'display': 'inline'}, width='auto')
+                            ], style={'marginBottom': '6px'}),
+                            dbc.Row([
+                                dbc.Col("Labels: ", style={'fontWeight': 'bold', 'display': 'inline'}, width='auto'),
+                                dbc.Col(row['labels'], style={'display': 'inline'}, width='auto')
+                            ], style={'marginBottom': '6px'}),
+                            dbc.Row([
+                                dbc.Col("Predicates: ", style={'fontWeight': 'bold', 'display': 'inline'}, width='auto'),
+                                dbc.Col(queries.loc[queries['query'] == row['query'], 'predicates'].values[0], style={'display': 'inline'}, width='auto')
+                            ], style={'marginBottom': '6px'}),
                         ],
                         bordered=True,
-                        style={'marginBottom': '10px', 'boxShadow': '0 2px 8px rgba(0, 0, 0, 0.15)', 'borderRadius': '8px'},
+                        style={
+                            'marginBottom': '10px',
+                            'boxShadow': '0 2px 8px rgba(0, 0, 0, 0.15)',
+                            'borderRadius': '8px',
+                            'backgroundColor': '#fafafa'  # Slightly different background color for the card body
+                        },
                         bodyStyle={'padding': '10px'},
                         hoverable=True,
+                        headStyle={'backgroundColor': '#f0f2f5'}  # Slightly different color for the card header
                     ),
-                    'color': 'blue',   
-                    'label': html.Span(f"# {index + 1}", style={'fontSize': '14px', 'color': 'black'})  # Using step numbers instead of query names
+                    'color': 'blue',
                 }
                 for index, row in evaluations.iterrows()
             ]
 
+
             # Build the AntdTimeline component
-            timeline_content = fac.AntdTimeline(
-                items=timeline_items,
-                mode='alternate',   
-                style={'paddingLeft': '20px', 'width':'100%'},   
-                pending="Processing.."
+            timeline_content = fac.AntdSpace(
+                [
+                    fac.AntdTimeline(
+                        items=timeline_items,
+                        style={'paddingLeft': '20px', 'width': '100%'},
+                        pending="Processing.."
+                    )
+                ],
+                direction='vertical',
+                align='start',
+                style={'width': '100%'}
             )
 
-             
             return True, timeline_content
 
 
@@ -750,6 +884,8 @@ class Vel:
             if existing_conditions is None:
                 existing_conditions = []
 
+            radio_options = self.generate_grouped_radio_options(self.predicate_categories)
+
             existing_conditions.append(
                 html.Div(
                     [
@@ -758,44 +894,74 @@ class Vel:
 
                         dbc.Row([
                                 dbc.Col(
-                                    fac.AntdSwitch(
-                                        checked=True,
-                                        readOnly=True,
-                                        checkedChildren="AND",
-                                        unCheckedChildren="OR",
-                                        className="my-auto",
-                                        style={'marginBottom': '10px'}
-                                    ),
-                                    width=2, align="center"
+                                    fac.AntdDivider(
+                                        fac.AntdSpace(
+                                               [
+                                                   fac.AntdTag(
+                                                       content='AND',
+                                                       bordered=True,
+                                                       color='blue',
+                                                   )
+                                                ],
+                                                wrap=True,
+                                            ), innerTextOrientation='center'),
+
+                                    width=12, align="center"
                                 )
                             ], style={'marginBottom': '30px'}),
 
                         # Query Condition Inputs
                         dbc.Row([
-                            dbc.Col(fac.AntdText(f'Condition {condition_count + 1}:', className="font-weight-bold"), width="auto", align="center"),
-                            dbc.Col(fac.AntdRadioGroup(
-                                options=[{'label': f'{c}', 'value': c} for c in self.getPredicates()],
-                                id={'type': 'radios', 'index': f'{index}-{condition_count}'},
-                                optionType='button'
-                            ), width=8),
+                            dbc.Col(fac.AntdText(f'Condition {condition_count + 1}:', className="font-weight-bold"), width=1, align="center"),
+                            dbc.Col(
+                                fac.AntdRadioGroup(
+                                    options=radio_options,
+                                    id={'type': 'radios', 'index': f'{index}-{0}'},
+                                    optionType='button',
+                                    buttonStyle='solid',
+                                    style={'flexWrap': 'wrap',}
+                                ),className='radio-group-container',
+                                width=8, align='start' ,style={'paddingLeft': '0vw'}
+                            ),
                            dbc.Col(
-                                dbc.Button(
-                                    [
-                                        html.I(className="bi bi-trash3-fill", style={"marginRight": "8px"}), 
-                                    ],
-                                    id={'type': 'remove-condition-button', 'index': f'{index}-{condition_count}'}, 
-                                    color='secondary',
-                                    n_clicks=0,
-                                    className='custom-trash-button'
-                                    ),
-                                    width="auto", align="start"
-                            )
-                            ], className="mb-3"),
+                               fac.AntdTooltip(
+                                fac.AntdIcon(
+                                    id={'type': 'remove-condition-button', 'index': f'{index}-{condition_count}'},
+                                    nClicks=0,
+                                    icon='antd-delete-two-tone',
+                                    style={'fontSize': 20, 'cursor': 'pointer'},
+                                ),
+                                id = "tooltip-label",
+                                title="Delete Condition",
+                                # color="#ffffff",  # Pure white background with a gradient
+                                    placement="top",  
+                                    trigger="hover",
+                                    overlayStyle={
+                                        'padding': '2px',  
+                                        'fontSize': '15px',  
+                                        'color': '#2c3e50',  
+                                        'borderRadius': '10px',  
+                                        'boxShadow': '0px 6px 10px rgba(0, 0, 0, 0.12)',  
+                                        # 'backgroundImage': 'linear-gradient(135deg, #f8f9fa 10%, #ffffff 100%)',  
+                                        'textShadow': '0.5px 0.5px 2px rgba(0, 0, 0, 0.05)'  
+                                    },
+                            ),width="auto", align="start")
+                                # dbc.Button(
+                                #     [
+                                #         html.I(className="antd-delete-two-tone", style={"marginRight": "8px"}), 
+                                #     ],
+                                #     id={'type': 'remove-condition-button', 'index': f'{index}-{condition_count}'}, 
+                                #     color='secondary',
+                                #     n_clicks=0,
+                                #     className='custom-trash-button'
+                                #     ),
+                                    
+                            ], className="mb-4 mt-4"),
                         
                         # Additional Inputs for Each Condition
                         dbc.Row([
                             dbc.Col(html.Div(id={'type': 'Query_input', 'index': f'{index}-{condition_count}'}))
-                        ], className="mb-3"),
+                        ], className="mb-4 mt-4"),
                     ]
                 )
             )
@@ -807,7 +973,7 @@ class Vel:
         @app.callback(
             Output({'type': 'condition-container', 'index': ALL}, 'children', allow_duplicate=True),
             Output({'type': 'condition-store', 'index': ALL}, 'data', allow_duplicate=True),
-            Input({'type': 'remove-condition-button', 'index': ALL}, 'n_clicks'),
+            Input({'type': 'remove-condition-button', 'index': ALL}, 'nClicks'),
             State({'type': 'condition-container', 'index': ALL}, 'children'),
             State({'type': 'condition-store', 'index': ALL}, 'data'),
             prevent_initial_call=True
@@ -927,7 +1093,7 @@ class Vel:
                             ),
 
                     description
-                ], style={'color': 'gray', 'fontSize': '15px', 'display': 'flex', 'alignItems': 'center', 'paddingBottom': '20px'}, className="font-weight-bold")
+                ], style={'color': 'black', 'fontSize': '15px', 'display': 'flex', 'alignItems': 'center', 'paddingBottom': '20px','fontWeight':'500'}, className="font-weight-bold")
             return html.Div()
 
         @app.callback(
@@ -963,16 +1129,18 @@ class Vel:
 
                     return html.Div([
                         dbc.Row([
-                                dbc.Col(fac.AntdText('Attribute Key:', type='secondary'), width="auto", align="center"),
+                                dbc.Col(fac.AntdText('Attribute Key:', className="font-weight-bold"), width=1, align="center"),
                                 dbc.Col(fac.AntdSelect(
                                     id={'type': 'attribute_key_dropdown', 'index': f'{query_index}-{cond_index}'},
                                     options=[{'label': col, 'value': col} for col in self.df.columns],
-                                    style={'width': '100%'}
-                                ), width=2)
-                            ], className="mb-3"),
-                                dbc.Col(html.Div(
-                                    id={'type': 'value_options_container', 'index': f'{query_index}-{cond_index}'}
-                                    ))
+                                    style={'width': '11vw', 'paddingLeft': '0vw'}
+                                ), width=1),
+                                dbc.Col(width=1,style={'width': '10vw'}),
+                                dbc.Col(
+                                    id={'type': 'value_options_container1', 'index': f'{query_index}-{cond_index}'}, width=1, align="center"),
+                                dbc.Col(
+                                    id={'type': 'value_options_container2', 'index': f'{query_index}-{cond_index}'}, width=1)           
+                            ], className="mb-4 mt-4", align="center"),
                     ])
 
 
@@ -981,19 +1149,24 @@ class Vel:
                     
                     return html.Div([
                         dbc.Row([
-                                    dbc.Col(fac.AntdText('Attribute Key:', type='secondary'), width="auto", align="center"),
+                                    dbc.Col(fac.AntdText('Attribute Key:', className="font-weight-bold"), width=1, align="center"),
                                     dbc.Col(fac.AntdSelect(
                                         id={'type': 'attribute_key_dropdown', 'index': f'{query_index}-{cond_index}'},                             
                                         options=[{'label': col, 'value': col} for col in self.df.columns],
-                                        style={'width': '100%'}
-                                    ), width=2)
-                                ], className="mb-3"),
-                        dbc.Row([
-                                    dbc.Col(fac.AntdText('Value:', type='secondary'), width="auto", align="center"),
+                                        style={'width': '11vw', 'paddingLeft': '0vw'}
+                                    ), width=1),
+                                    dbc.Col(width=1,style={'width': '10vw'}),
+                                    dbc.Col(fac.AntdText('Value:', className="font-weight-bold"), width=1, align="center"),
                                     dbc.Col(fac.AntdInput(
                                                         id={'type': 'value_input', 'index': f'{query_index}-{cond_index}'},
-                                                        placeholder='Enter a value', size='middle', style={'width': '100%'}), width=2)
-                                ], className="mb-3"),
+                                                        placeholder='Enter a value', size='middle', style={'width': '11vw'}), width=1)
+                                ], className="mb-4 mt-4"),
+                        # dbc.Row([
+                        #             dbc.Col(fac.AntdText('Value:', type='secondary'), width="auto", align="center"),
+                        #             dbc.Col(fac.AntdInput(
+                        #                                 id={'type': 'value_input', 'index': f'{query_index}-{cond_index}'},
+                        #                                 placeholder='Enter a value', size='middle', style={'width': '100%'}), width=2)
+                        #         ], className="mb-4 mt-4"),
                         dcc.Store(id={'type':'value1', 'index': f'{query_index}-{cond_index}'})
                     ])
 
@@ -1003,14 +1176,14 @@ class Vel:
 
                     return html.Div([
                         dbc.Row([
-                                dbc.Col(fac.AntdText('Values:', type='secondary'), width="auto", align="center"),
+                                dbc.Col(fac.AntdText('Values:', className="font-weight-bold"), width="auto", align="center"),
                                 dbc.Col(fac.AntdSelect(
                                     id={'type':'values_dropdown', 'index': f'{query_index}-{cond_index}'}, 
                                     options=[{'label': value, 'value': value} for value in unique_values],
                                     mode='tags',
-                                    style={'width': '100%'}
-                                ), width=2)
-                            ], className="mb-3"),
+                                    style={'width': '11vw', 'paddingLeft': '0vw'}
+                                ), width=1)
+                            ], className="mb-4 mt-4"),
                         # dcc.Store(id={'type':'value2', 'index': f'{query_index}-{cond_index}'})
                     ])
 
@@ -1018,14 +1191,15 @@ class Vel:
                     if 'group_by' in arg_names:
                         return html.Div([
                             dbc.Row([
-                                dbc.Col(fac.AntdText('Aggregate Column:', type='secondary'), width="auto", align="center"),
+                                dbc.Col(fac.AntdText('Aggregate Column:', className="font-weight-bold"), width="auto", align="center"),
                                 dbc.Col(fac.AntdSelect(
                                     # id='attribute_key_dropdown_groupby',
                                     id={'type': 'attribute_key_dropdown_groupby', 'index': f'{query_index}-{cond_index}'}, 
                                     options=[{'label': col, 'value': col} for col in self.log.columns],
-                                    style={'width': '100%'}
-                                ), width=2)
-                            ], className="mb-3"),
+                                    style={'width': '11vw', 'paddingLeft': '0vw'}
+                                ), width=1)
+                            ], className="mb-4 mt-4"),
+                            dbc.Col(width=1,style={'width': '10vw'}),
                             dbc.Col(html.Div(id={'type': 'groupby_options_container', 'index': f'{query_index}-{cond_index}'})),
                             dcc.Store(id={'type':'value4', 'index': f'{query_index}-{cond_index}'})
                             
@@ -1044,29 +1218,43 @@ class Vel:
 
                     return html.Div([
                         dbc.Row([
-                            dbc.Col(fac.AntdText('Time Unit:', type='secondary'), width="auto", align="center"),
+                            dbc.Col(fac.AntdText('Time Unit:', className="font-weight-bold"), width=1, align="center"),
                             dbc.Col(fac.AntdSelect(
                                 id={'type': 'time_unit_dropdown', 'index': f'{query_index}-{cond_index}'},
                                 options=time_units,
                                 defaultValue='Hours',
-                                style={'width': '100%'}
-                            ), width=2),
-                        ], className="mb-3"),
-
-                        dbc.Row([
-                            dbc.Col(fac.AntdText('Min Duration(seconds):', type='secondary'), width="auto", align="center"),
+                                style={'width': '11vw', 'paddingLeft': '0vw'}
+                            ), width=1),
+                            dbc.Col(width=1,style={'width': '10vw'}),
+                            dbc.Col(fac.AntdText('Min Duration(seconds):', className="font-weight-bold"), width="auto", align="center"),
                             dbc.Col(fac.AntdInputNumber(
                                 id={'type': 'min_duration', 'index': f'{query_index}-{cond_index}'},
                                 placeholder='Enter min duration', 
-                                style={'width': '100%'}
-                            ), width=2),
-                            dbc.Col(fac.AntdText('Max Duration(seconds):', type='secondary'), width="auto", align="center"),    
+                                style={'width': '11vw', 'paddingLeft': '0vw'}
+                            ), width=1),
+                            dbc.Col(width=1,style={'width': '10vw'}),
+                            dbc.Col(fac.AntdText('Max Duration(seconds):', className="font-weight-bold"), width="auto", align="center"),    
                             dbc.Col(fac.AntdInputNumber(
                                 id={'type': 'max_duration', 'index': f'{query_index}-{cond_index}'},
                                 placeholder='Enter max duration', 
-                                style={'width': '100%'}
-                            ), width=2)
-                        ], className="mb-3"),
+                                style={'width': '11vw', 'paddingLeft': '0vw'}
+                            ), width=1)
+                        ], className="mb-4 mt-4"),
+
+                        # dbc.Row([
+                        #     dbc.Col(fac.AntdText('Min Duration(seconds):', type='secondary'), width="auto", align="center"),
+                        #     dbc.Col(fac.AntdInputNumber(
+                        #         id={'type': 'min_duration', 'index': f'{query_index}-{cond_index}'},
+                        #         placeholder='Enter min duration', 
+                        #         style={'width': '100%'}
+                        #     ), width=2),
+                        #     dbc.Col(fac.AntdText('Max Duration(seconds):', type='secondary'), width="auto", align="center"),    
+                        #     dbc.Col(fac.AntdInputNumber(
+                        #         id={'type': 'max_duration', 'index': f'{query_index}-{cond_index}'},
+                        #         placeholder='Enter max duration', 
+                        #         style={'width': '100%'}
+                        #     ), width=2)
+                        # ], className="mb-4 mt-4"),
 
                         dbc.Row([
                             dbc.Col(fac.AntdSlider(
@@ -1077,7 +1265,7 @@ class Vel:
                                 step=3600,  
                                 marks={i: f'{i//86400}d' for i in range(0, 86400 + 1, 86400)},  # Every day mark
                                 value=[0, 86400],
-                            ), width=12)
+                            ), width=12, align="center", style={'paddingLeft': '1vw', 'paddingRight': '1vw'})
                         ]),
                         dcc.Store(id={'type':'value3', 'index': f'{query_index}-{cond_index}'})
                     ])
@@ -1323,11 +1511,11 @@ class Vel:
                         options=[{'label': col, 'value': col} for col in self.log.columns],
                         defaultValue='case:concept:name',
                         mode='tags',
-                        style={'width': '100%'}
-                    ), width=2),
+                        style={'width': '11vw', 'paddingLeft': '0vw'}
+                    ), width=1),
                     dbc.Col(id={'type': 'warning_message', 'index': cond_id['index']}, width=2)
 
-                ], className="mb-3")
+                ], className="mb-4 mt-4")
             ])
 
         @app.callback(
@@ -1411,7 +1599,8 @@ class Vel:
         # @callback to run the predicate for values ETC, NETC
 
         @app.callback(
-            Output({'type': 'value_options_container', 'index': MATCH}, "children"),
+            Output({'type': 'value_options_container1', 'index': MATCH}, "children"),
+            Output({'type': 'value_options_container2', 'index': MATCH}, "children"),
             Input({'type': 'attribute_key_dropdown', 'index': MATCH}, "value"),
             Input({'type': 'attribute_key_dropdown', 'index': MATCH}, "id"),
             State("qname_index", 'data'),
@@ -1428,19 +1617,32 @@ class Vel:
         
             unique_values = self.df[selected_key].unique()
 
-            return html.Div([
-                dbc.Row([
-                    dbc.Col(fac.AntdText('Values:', type='secondary'), width="auto", align="center"),
-                    dbc.Col(fac.AntdSelect(
+            return fac.AntdText('Values:', className="font-weight-bold"),fac.AntdSelect(
                         id={'type': 'value_equality', 'index': f'{query_index}-{cond_index}'},
                         options=[{'label': value, 'value': value} for value in unique_values if not pd.isna(value)],
-                        # value=unique_values[0] if len(unique_values) > 0 else None, 
                         mode='tags',
-                        style={'width': '100%'}
-                    ), width=2)
-                ], className="mb-3"),
-            ])
+                        style={'width': '11vw', 'paddingLeft': '0vw'})
+            
 
+        # @app.callback(
+        #     Output({'type': 'value_equality', 'index': MATCH}, "options"),
+        #     Input({'type': 'attribute_key_dropdown', 'index': MATCH}, "value"),
+        #     Input({'type': 'attribute_key_dropdown', 'index': MATCH}, "id"),
+        #     State("qname_index", 'data'),
+        #     prevent_initial_call=True
+        # )
+        # def update_value_options(selected_key, cond_id, query_index):
+        #     cond_index_parts = cond_id['index'].split('-')
+        #     cond_index = int(cond_index_parts[-1])
+
+        #     if selected_key is None:
+        #         return dash.no_update
+
+        #     self.update_condition(query_index, cond_index, 'attribute_key', selected_key)
+        
+        #     unique_values = self.df[selected_key].unique()
+
+        #     return [{'label': value, 'value': value} for value in unique_values if not pd.isna(value)]
         
         @app.callback(
             Output({'type': 'value_equality', 'index': MATCH}, "value"),
@@ -1485,60 +1687,187 @@ class Vel:
 
             return tag_values
 
-
-
+        
+        # Callback to run the query and store the result
         @app.callback(
-            Output({'type': 'predicate_output', 'index': MATCH}, "children"),
-            [
-                Input({"type": "submit", "index": ALL}, "n_clicks"),
-                # Input({"type": "label-container", "index": ALL}, "children"),
-                # Input({"type": "log_selector", "index": ALL}, "value"),
-            ],
+            [Output({'type': 'predicate_output', 'index': MATCH}, "children", allow_duplicate=True),
+            Output({'type': 'query-result', 'index': MATCH}, "data")],
+            Input({"type": "submit", "index": ALL}, "n_clicks"),
             State("qname_index", "data"),
-            #  State({'type': 'query_name', 'index': ALL}, "value")],
             prevent_initial_call=True
         )
         def on_button_click(n_clicks, query_index):
-
             if n_clicks[0] is None:
                 raise dash.exceptions.PreventUpdate
 
-            
-            # Initial loading state with the skeleton
-            skeleton = fac.AntdSkeleton(
-                loading=True,
-                active=True,
-                title=True,
-                paragraph={'rows': 20}
-            )
-
-            # Show the skeleton while processing
             if n_clicks[0] > 0:
-               
-                # result = VelPredicate.run_predicate(self.log_view, self.log, self.conditions, f'Query{query_index + 1}')
-                # VelPredicate.apply_label_to_result(self.log_view, result, label)
+                # Run the query and get the result
                 result = VelPredicate.run_predicate(self.log_view, self.conditions, f'Query{query_index + 1}')
 
-                # Once processing is done, hide the skeleton and show the table
+                # If there's no data, return a message
                 if result is None or result.empty:
-                    return html.Div("No data available for the selected predicate.")
-                
+                    return html.Div("No data available for the selected predicate."), dash.no_update
+
+                # Store the full result in a hidden dcc.Store
+                stored_data = result.to_dict('records')
+
+                # Get the shape of the result
+                self.num_cases = len(result['case:concept:name'].unique())
+                self.num_events = len(result)
+
+                # Display shape information
+                shape_info = html.Div([
+                    html.Span(f"Number of Cases: {self.num_cases}", style={'fontWeight': 'bold', 'marginRight': '20px'}),
+                    html.Span(f"Number of Events: {self.num_events}", style={'fontWeight': 'bold'})
+                ], style={'marginBottom': '10px'})
+
+                # Initialize DataTable with the first 10 rows
                 table = dash_table.DataTable(
                     columns=[{"name": i, "id": i} for i in result.columns],
-                    data=result.to_dict('records'),
-                    page_action="native",
-                    page_current=0,
+                    data=stored_data[:10],  # Display first 10 rows
                     page_size=10,
+                    page_action='none',  # Disables internal pagination
+                    style_table={'overflowX': 'auto'},
+                    style_cell={'textAlign': 'left'}
                 )
 
-                return fac.AntdSkeleton(
-                    loading=False,  # Hide skeleton, show table
-                    active=True,
-                    paragraph={'rows': 20},
-                    children=[table]
+                # Load more options
+                load_more_options = html.Div([
+                    dbc.Button("Load Next 10 Rows", id={'type': 'load-next-rows-button', 'index': query_index}, n_clicks=0, style={'marginRight': '10px'}),
+                    dbc.Button("Load Full Table", id={'type': 'load-full-table-button', 'index': query_index}, n_clicks=0, style={'marginRight': '10px'}),
+                ], style={'marginTop': '10px'})
+
+                return html.Div([shape_info, table, load_more_options]), stored_data
+
+            return html.Div(), dash.no_update
+
+        # Callback for handling the "Load Next 10 Rows" functionality
+        @app.callback(
+            Output({'type': 'predicate_output', 'index': MATCH}, "children", allow_duplicate=True),
+            Output({'type': 'row-number-store', 'index': MATCH}, 'data'),
+            Input({'type': 'load-next-rows-button', 'index': MATCH}, 'n_clicks'),
+            State({'type': 'predicate_output', 'index': MATCH}, 'children'),
+            State({'type': 'query-result', 'index': MATCH}, 'data'),
+            State({'type': 'row-number-store', 'index': MATCH}, 'data'),
+            State("qname_index", "data"),
+            prevent_initial_call=True
+        )
+        def load_next_10_rows(n_clicks, current_output, stored_data, current_rows, query_index):
+            if n_clicks > 0:
+                
+                new_row_number = current_rows + 10
+
+                # Create the updated DataTable
+                table = dash_table.DataTable(
+                    columns=[{"name": i, "id": i} for i in stored_data[0].keys()],
+                    data=stored_data[:new_row_number],  # Display updated set of rows
+                    page_size=10,
+                    page_action='native',
+                    style_table={'overflowX': 'auto'},
+                    style_cell={'textAlign': 'left'}
                 )
 
-            return skeleton
+                # Retain existing shape info and load more options
+                
+                shape_info = html.Div([
+                    html.Span(f"Number of Cases: {self.num_cases}", style={'fontWeight': 'bold', 'marginRight': '20px'}),
+                    html.Span(f"Number of Events: {self.num_events}", style={'fontWeight': 'bold'})
+                ], style={'marginBottom': '10px'})
+
+                load_more_options = html.Div([
+                    dbc.Button("Load Next 10 Rows", id={'type': 'load-next-rows-button', 'index': query_index}, n_clicks=0, style={'marginRight': '10px'}),
+                    dbc.Button("Load Full Table", id={'type': 'load-full-table-button', 'index': query_index}, n_clicks=0, style={'marginRight': '10px'}),
+                ], style={'marginTop': '10px'})
+
+                return html.Div([shape_info, table, load_more_options]), new_row_number
+
+            return dash.no_update
+
+
+
+        # Callback for handling the "Load Full Table" functionality
+        @app.callback(
+            Output({'type': 'predicate_output', 'index': MATCH}, "children", allow_duplicate=True),
+            Input({'type': 'load-full-table-button', 'index': MATCH}, 'n_clicks'),
+            State({'type': 'query-result', 'index': MATCH}, 'data'),
+            prevent_initial_call=True
+        )
+        def load_full_table(n_clicks, stored_data):
+            if n_clicks > 0:
+
+                table = dash_table.DataTable(
+                    columns=[{"name": i, "id": i} for i in stored_data[0].keys()],
+                    data=stored_data,
+                    page_size=10,  # Adjust the page size if needed
+                    style_table={'overflowX': 'auto'},
+                    style_cell={'textAlign': 'left'},
+                    page_action='native'  # Enables pagination
+                )
+
+                shape_info = html.Div([
+                    html.Span(f"Number of Cases: {self.num_cases}", style={'fontWeight': 'bold', 'marginRight': '20px'}),
+                    html.Span(f"Number of Events: {self.num_events}", style={'fontWeight': 'bold'})
+                ], style={'marginBottom': '10px'})
+
+
+                return html.Div([shape_info, table])
+
+            return dash.no_update
+
+
+
+        # @app.callback(
+        #     Output({'type': 'predicate_output', 'index': MATCH}, "children"),
+        #     [
+        #         Input({"type": "submit", "index": ALL}, "n_clicks"),
+        #         # Input({"type": "label-container", "index": ALL}, "children"),
+        #         # Input({"type": "log_selector", "index": ALL}, "value"),
+        #     ],
+        #     State("qname_index", "data"),
+        #     #  State({'type': 'query_name', 'index': ALL}, "value")],
+        #     prevent_initial_call=True
+        # )
+        # def on_button_click(n_clicks, query_index):
+
+        #     if n_clicks[0] is None:
+        #         raise dash.exceptions.PreventUpdate
+
+            
+        #     # Initial loading state with the skeleton
+        #     skeleton = fac.AntdSkeleton(
+        #         loading=True,
+        #         active=True,
+        #         title=True,
+        #         paragraph={'rows': 20}
+        #     )
+
+        #     # Show the skeleton while processing
+        #     if n_clicks[0] > 0:
+               
+        #         # result = VelPredicate.run_predicate(self.log_view, self.log, self.conditions, f'Query{query_index + 1}')
+        #         # VelPredicate.apply_label_to_result(self.log_view, result, label)
+        #         result = VelPredicate.run_predicate(self.log_view, self.conditions, f'Query{query_index + 1}')
+
+        #         # Once processing is done, hide the skeleton and show the table
+        #         if result is None or result.empty:
+        #             return html.Div("No data available for the selected predicate.")
+                
+        #         table = dash_table.DataTable(
+        #             columns=[{"name": i, "id": i} for i in result.columns],
+        #             data=result.to_dict('records'),
+        #             page_action="native",
+        #             page_current=0,
+        #             page_size=10,
+        #         )
+
+        #         return fac.AntdSkeleton(
+        #             loading=False,  # Hide skeleton, show table
+        #             active=True,
+        #             paragraph={'rows': 20},
+        #             children=[table]
+        #         )
+
+        #     return skeleton
 
 
         # @app.callback(

@@ -3,12 +3,14 @@ body {
     font-family: 'Plus Jakarta Sans', 'Noto Sans', sans-serif;
     background-color: #bad2ea !important; /* Light blue background */
     color: #fbfcfd;
-    margin: 70px !important;
-    padding: 0;
+    margin: 30px !important;
+    /* padding: 0; */
     /* height: 100vh; */
     /* display: flex; */
-    align-items: center;
-    justify-content: center;
+    /* align-items: center; */
+    /* justify-content: center; */
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;
 }
 
 /* Header */
@@ -61,6 +63,10 @@ button, .btn {
     font-weight: 700;
 }
 
+.font-weight-bold {
+    font-weight: 500;
+}
+
 .btn-primary {
     background-color: #008cff;
     color: #eff5fb;
@@ -90,25 +96,17 @@ button, .btn {
 .custom-separator {
     margin-left: 20px; /* Add space between groups */
 }
+.radio-group-container {
+    display: grid;
+    grid-template-columns: repeat(1, 1fr); /* Adjust the number of columns here */
+    gap: 10px; /* Adjust the gap between items */
+}
+
+/* Hide scrollbar for Chrome, Safari and Opera */
+::-webkit-scrollbar {
+    display: none;
+}
+
 
 /* @keyframes loading {
     0% {
-      background-position: -200px 0;
-    }
-    100% {
-      background-position: calc(200px + 100%) 0;
-    }
-  }
-  
-  .shadow-loading {
-    animation: loading 1.5s infinite;
-    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-    background-size: 200px 100%;
-    border-radius: 4px;
-  }
-  
-  .loading-placeholder {
-    height: 20px;
-    margin: 10px 0;
-  } */
-  
