@@ -1,0 +1,5 @@
+Case ID,Activity,Complete Timestamp,Var1,Var2,Var3
+A0,activity,2006-07-24T00:00:00,1,1,0
+A1,activity,2006-07-24T00:00:00,1,1,1
+A2,activity,2006-07-24T00:00:00,1,2,1
+A3,activity,2006-07-24T00:00:00,1,2,0

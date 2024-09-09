@@ -8924,4 +8924,661 @@ def generate_query_tab(self, index):
         print(f"App is ready to run at : http://127.0.0.1:{constants.QUERYPORT}")
         app.run_server(port=constants.QUERYPORT, open_browser=True, debug=True)
 
+
+@app.callback(
+            Output({'type': 'predicate_output', 'index': MATCH}, "children", allow_duplicate=True),
+            Input({"type": "submit", "index": MATCH}, "n_clicks"),
+            # Input({'type':'warning-popup', 'index': MATCH}, 'visible'),
+            # State({'type': 'warning-state', 'index': MATCH}, 'data'),
+            State("qname_index", "data"),
+            prevent_initial_call=True
+        )
+        # def on_button_click(n_clicks, warning_visible, warning_state, query_index):
+        def on_button_click(n_clicks, query_index):
+
+            if n_clicks is None:
+                raise dash.exceptions.PreventUpdate
+            
+            # print("warning_state", warning_state, warning_visible, n_clicks)
+
+            if n_clicks > 0 :
+                start_time = time.time()
+                
+                # Log start
+                print("Running predicate...")
+
+                result, self.num_cases, self.num_events  = VelPredicate.run_predicate(self.log_view, self.conditions, f'Query{query_index + 1}', 10)
+
+                if result is None or result.empty:
+                    return html.Div("No data available for the selected filters, try different filters.")
+
+                table = dash_table.DataTable(
+                    columns=[{"name": i, "id": i} for i in result.columns],
+                    data= result.head(10).to_dict('records'),  
+                    page_size=10,
+                    page_action='none',  
+                    style_table={'overflowX': 'auto'},
+                    style_cell={'textAlign': 'left'}
+                )
+
+                # self.num_cases = len(result['case:concept:name'].unique())
+                # self.num_events = len(result)
+
+                shape_info = html.Div([
+                    html.Span(f"Number of Cases: {self.num_cases}", style={'fontWeight': 'bold', 'marginRight': '20px'}),
+                    html.Span(f"Number of Events: {self.num_events}", style={'fontWeight': 'bold'})
+                ], style={'marginBottom': '10px'})
+
+                load_more_options = html.Div([
+                    dbc.Button("Load Next 10 Rows", id={'type': 'load-next-rows-button', 'index': query_index}, n_clicks=0, style={'marginRight': '10px'}),
+                    dbc.Button("Load Full Table", id={'type': 'load-full-table-button', 'index': query_index}, n_clicks=0, style={'marginRight': '10px'}),
+                ], style={'marginTop': '10px'})
+
+                print(f"Total execution time: {time.time() - start_time:.2f} seconds")
+
+                return html.Div([shape_info, table, load_more_options])
+
+            return html.Div()
         
+        @app.callback(
+        [
+            Output({'type': 'query-result', 'index': MATCH}, "data")],
+            Input({"type": "submit", "index": ALL}, "n_clicks"),
+            # Input({'type':'warning-popup', 'index': MATCH}, 'visible'),
+            State("qname_index", "data"),
+            prevent_initial_call=True
+        )
+        def on_button_click_background(n_clicks , query_index):
+            if n_clicks[0] is None:
+                raise dash.exceptions.PreventUpdate
+
+            if n_clicks[0] > 0 :
+                start_time = time.time()
+                
+                # Log start
+                print("Running predicate background entire...")
+
+                result, _, _  = VelPredicate.run_predicate(self.log_view, self.conditions, f'Query{query_index + 1}', 0)
+
+                if result is None or result.empty:
+                    return [result.to_dict('records')]
+
+                print(f"Total execution time: {time.time() - start_time:.2f} seconds")
+
+                return [result.to_dict('records')]
+
+            return dash.no_update
+        # Callback for handling the "Load Next 10 Rows" functionality
+        @app.callback(
+            Output({'type': 'predicate_output', 'index': MATCH}, "children", allow_duplicate=True),
+            Output({'type': 'row-number-store', 'index': MATCH}, 'data'),
+            Input({'type': 'load-next-rows-button', 'index': MATCH}, 'n_clicks'),
+            State({'type': 'predicate_output', 'index': MATCH}, 'children'),
+            State({'type': 'query-result', 'index': MATCH}, 'data'),
+            State({'type': 'row-number-store', 'index': MATCH}, 'data'),
+            State("qname_index", "data"),
+            prevent_initial_call=True
+        )
+        def load_next_10_rows(n_clicks, current_output, stored_data, current_rows, query_index):
+            if n_clicks > 0:
+                
+                new_row_number = current_rows + 10
+
+                # Create the updated DataTable
+                table = dash_table.DataTable(
+                    columns=[{"name": i, "id": i} for i in stored_data[0].keys()],
+                    data=stored_data[:new_row_number], 
+                    page_size=10,
+                    page_action='native',
+                    style_table={'overflowX': 'auto'},
+                    style_cell={'textAlign': 'left'}
+                )
+                
+                shape_info = html.Div([
+                    html.Span(f"Number of Cases: {self.num_cases}", style={'fontWeight': 'bold', 'marginRight': '20px'}),
+                    html.Span(f"Number of Events: {self.num_events}", style={'fontWeight': 'bold'})
+                ], style={'marginBottom': '10px'})
+
+                load_more_options = html.Div([
+                    dbc.Button("Load Next 10 Rows", id={'type': 'load-next-rows-button', 'index': query_index}, n_clicks=0, style={'marginRight': '10px'}),
+                    dbc.Button("Load Full Table", id={'type': 'load-full-table-button', 'index': query_index}, n_clicks=0, style={'marginRight': '10px'}),
+                ], style={'marginTop': '10px'})
+
+                return html.Div([shape_info, table, load_more_options]), new_row_number
+
+            return dash.no_update
+
+
+
+        # Callback for handling the "Load Full Table" functionality
+        @app.callback(
+            Output({'type': 'predicate_output', 'index': MATCH}, "children", allow_duplicate=True),
+            Input({'type': 'load-full-table-button', 'index': MATCH}, 'n_clicks'),
+            State({'type': 'query-result', 'index': MATCH}, 'data'),
+            prevent_initial_call=True
+        )
+        def load_full_table(n_clicks, stored_data):
+            if n_clicks > 0:
+
+                table = dash_table.DataTable(
+                    columns=[{"name": i, "id": i} for i in stored_data[0].keys()],
+                    data=stored_data,
+                    page_size=10,  
+                    style_table={'overflowX': 'auto'},
+                    style_cell={'textAlign': 'left'},
+                    page_action='native'  
+                )
+
+                shape_info = html.Div([
+                    html.Span(f"Number of Cases: {self.num_cases}", style={'fontWeight': 'bold', 'marginRight': '20px'}),
+                    html.Span(f"Number of Events: {self.num_events}", style={'fontWeight': 'bold'})
+                ], style={'marginBottom': '10px'})
+
+
+                return html.Div([shape_info, table])
+
+            return dash.no_update
+        
+
+    def get_predicate_groupings(self):
+        return [
+            {"label": "Attribute-Based Filters", "options": [
+                {"label": "Equals to Constant", "value": "EqToConstant"},
+                {"label": "Not Equals to Constant", "value": "NotEqToConstant"}
+            ]},
+            {"label": "Threshold-Based Filters", "options": [
+                {"label": "Greater or Equal to Constant", "value": "GreaterEqualToConstant"},
+                {"label": "Less or Equal to Constant", "value": "LessEqualToConstant"},
+                {"label": "Greater Than Constant", "value": "GreaterThanConstant"},
+                {"label": "Less Than Constant", "value": "LessThanConstant"}
+            ]},
+            {"label": "Aggregate-Based Filters", "options": [
+                {"label": "Sum of Values", "value": "SumAggregate"},
+                {"label": "Maximum of Values", "value": "MaxAggregate"},
+                {"label": "Minimum of Values", "value": "MinAggregate"}
+            ]},
+            {"label": "Event-Based Filters", "options": [
+                {"label": "Starts with Specific Event", "value": "StartWith"},
+                {"label": "Ends with Specific Event", "value": "EndWith"}
+            ]},
+            {"label": "Time-Based Filters", "options": [
+                {"label": "Duration Within Specified Range", "value": "DurationWithin"}
+            ]}
+        ]
+
+
+    
+    # def get_all_source_logs(self):
+    #     """
+    #     Retrieve all unique source logs used in the evaluations.
+    #     """
+    #     source_logs = set()
+
+    #     # Access the query registry from the LogView instance
+    #     query_registry = self.log_view.query_registry
+    #     print("Query Registry: ", query_registry)
+
+    #     # Iterate over all registered evaluations
+    #     for result_set_id in query_registry.get_registered_result_set_ids():
+    #         evaluation = query_registry.get_evaluation(result_set_id)
+    #         source_log_name = evaluation['source_log'].name
+    #         source_logs.add(source_log_name)
+
+    #     return list(source_logs)
+
+
+            # Helper function to filter relevant inputs by query index
+        # def filter_relevant_inputs(inputs, query_index):
+        #     return [input_value for input_value, comp_id in inputs if comp_id['index'].split('-')[0] == str(query_index)]
+
+        # # Helper function to check if a required field is missing
+        # def check_required_field(field, field_name, required_fields):
+        #     if not field:
+        #         required_fields.append(field_name)
+        #         return True
+        #     return False
+
+        # # Helper function to check attribute keys and values
+        # def validate_predicates(predicates, attr_keys, value_inputs, values_dropdowns, value_equalities, query_index, required_fields):
+        #     warning_state = False
+        #     for pred, _ in predicates:
+        #         if pred in ['EqToConstant', 'NotEqToConstant', 'GreaterEqualToConstant', 'LessEqualToConstant', 'GreaterThanConstant', 'LessThanConstant']:
+        #             if check_required_field(attr_keys, f"Missing Attribute Key for '{pred}' Predicate", required_fields):
+        #                 warning_state = True
+        #             if pred in ['EqToConstant', 'NotEqToConstant']:
+        #                 if check_required_field(value_equalities, f"Missing Value for '{pred}' Predicate", required_fields):
+        #                     warning_state = True
+        #             else:
+        #                 if check_required_field(value_inputs, f"Missing Input Value for '{pred}' Predicate", required_fields):
+        #                     warning_state = True
+        #         elif pred in ['StartWith', 'EndWith']:
+        #             if check_required_field(values_dropdowns, f"Missing Values for '{pred}' Predicate", required_fields):
+        #                 warning_state = True
+        #         elif pred == 'DurationWithin':
+        #             # Add additional checks for 'DurationWithin' if needed
+        #             pass
+        #         elif pred in ['SumAggregate', 'MaxAggregate', 'MinAggregate']:
+        #             # Add checks for aggregate predicates
+        #             pass
+        #     return warning_state
+
+        # # Optimized Callback
+        # @app.callback(
+        #     [
+        #         Output({'type': 'warning-popup', 'index': MATCH}, 'visible'),
+        #         Output({'type': 'warning-message', 'index': MATCH}, 'children'),
+        #         Output({'type': 'warning-state', 'index': MATCH}, 'data')
+        #     ],
+        #     [
+        #         Input({'type': 'submit', 'index': MATCH}, 'n_clicks')
+        #     ],
+        #     [
+        #         State({'type': 'query_name', 'index': MATCH}, 'value'),
+        #         State({'type': 'log_selector', 'index': MATCH}, 'value'),
+        #         State({'type': 'radios', 'index': ALL}, 'value'),
+        #         State({'type': 'attribute_key_dropdown', 'index': ALL}, 'value'),
+        #         State({'type': 'value_input', 'index': ALL}, 'value'),
+        #         State({'type': 'values_dropdown', 'index': ALL}, 'value'),
+        #         State({'type': 'value_equality', 'index': ALL}, 'value'),
+        #         State("qname_index", "data")
+        #     ]
+        # )
+        # def handle_run_query_click(n_clicks, query_name, log_selector, predicates, attr_keys, value_inputs, values_dropdowns, value_equalities, query_index):
+        #     if n_clicks is None or n_clicks == 0:
+        #         return False, "", False
+
+        #     required_fields = []
+        #     warning_state = False
+
+        #     # Filter relevant inputs for the current query
+        #     relevant_predicates = filter_relevant_inputs(list(zip(predicates, [{'index': f"{query_index}-{i}"} for i in range(len(predicates))])), query_index)
+        #     relevant_attr_keys = filter_relevant_inputs(attr_keys, query_index)
+        #     relevant_value_inputs = filter_relevant_inputs(value_inputs, query_index)
+        #     relevant_values_dropdowns = filter_relevant_inputs(values_dropdowns, query_index)
+        #     relevant_value_equalities = filter_relevant_inputs(value_equalities, query_index)
+
+
+        #     if check_required_field(query_name, "Query Name", required_fields):
+        #         warning_state = True
+
+        #     if check_required_field(log_selector, "Log", required_fields):
+        #         warning_state = True
+
+        #     warning_state = validate_predicates(relevant_predicates, relevant_attr_keys, relevant_value_inputs, relevant_values_dropdowns, relevant_value_equalities, query_index, required_fields)
+
+        #     if required_fields:
+        #         warning_message = f"Missing required fields: {', '.join(required_fields)}"
+        #         return True, warning_message, warning_state
+
+        #     return False, "", False
+
+
+        # # Callback to handle validation and display warnings only when Run Query is clicked
+        # @app.callback(
+        #     [
+        #         Output({'type': 'warning-popup', 'index': MATCH}, 'visible'),  # Control the visibility of the popup
+        #         Output({'type': 'warning-message', 'index': MATCH}, 'children'),  # Set the warning message
+        #         # Output({'type': 'submit', 'index': MATCH}, 'n_clicks'),
+        #         Output({'type': 'warning-state', 'index': MATCH}, 'data')  # Reset the click counter after handling
+        #     ],
+        #     [
+        #         Input({'type': 'submit', 'index': MATCH}, 'n_clicks')  # Trigger the popup on Run Query button click
+        #     ],
+        #     [
+        #         State({'type': 'query_name', 'index': MATCH}, 'value'),
+        #         State({'type': 'log_selector', 'index': MATCH}, 'value'),
+        #         State({'type': 'radios', 'index': ALL}, 'value'),
+        #         State({'type': 'attribute_key_dropdown', 'index': ALL}, 'value'),
+        #         State({'type': 'attribute_key_dropdown_groupby', 'index': ALL}, 'value'),
+        #         State({'type': 'value_input', 'index': ALL}, 'value'),
+        #         State({'type': 'values_dropdown', 'index': ALL}, 'value'),
+        #         State({'type': 'time_unit_dropdown', 'index': ALL}, 'value'),
+        #         State({'type': 'min_duration', 'index': ALL}, 'value'),
+        #         State({'type': 'max_duration', 'index': ALL}, 'value'),
+        #         State({'type': 'groupby_options', 'index': ALL}, 'value'),
+        #         State({'type': 'value_equality', 'index': ALL}, 'value'),
+        #         State("qname_index", "data"),  # Active query index
+        #         State({'type': 'warning-state', 'index': MATCH}, 'data')
+        #     ]
+        # )
+        # def handle_run_query_click(n_clicks, query_name, log_selector, predicates, attr_keys, groupby_attr_keys, value_inputs, values_dropdowns, time_units, min_durations, max_durations, groupby_options, value_equalities, query_index, warning_state):
+        #     if n_clicks is None or n_clicks == 0:
+        #         return False, "", False
+
+        #     required_fields = []
+
+        #     # This function filters inputs by query_index
+        #     def filter_relevant_inputs(inputs, ids):
+        #         # Ensure 'index' field is always string to split correctly
+        #         return [
+        #             (input_value, comp_id) for input_value, comp_id in zip(inputs, ids)
+        #             if isinstance(comp_id['index'], str) and comp_id['index'].split('-')[0] == str(query_index)
+        #         ]
+
+        #     # Applying the filtering for each input type
+        #     relevant_predicates = filter_relevant_inputs(predicates, [{'index': f"{query_index}-{i}"} for i in range(len(predicates))])
+        #     relevant_attr_keys = filter_relevant_inputs(attr_keys, [{'index': f"{query_index}-{i}"} for i in range(len(attr_keys))])
+        #     relevant_groupby_attr_keys = filter_relevant_inputs(groupby_attr_keys, [{'index': f"{query_index}-{i}"} for i in range(len(groupby_attr_keys))])
+        #     relevant_value_inputs = filter_relevant_inputs(value_inputs, [{'index': f"{query_index}-{i}"} for i in range(len(value_inputs))])
+        #     relevant_values_dropdowns = filter_relevant_inputs(values_dropdowns, [{'index': f"{query_index}-{i}"} for i in range(len(values_dropdowns))])
+        #     relevant_time_units = filter_relevant_inputs(time_units, [{'index': f"{query_index}-{i}"} for i in range(len(time_units))])
+        #     relevant_min_durations = filter_relevant_inputs(min_durations, [{'index': f"{query_index}-{i}"} for i in range(len(min_durations))])
+        #     relevant_max_durations = filter_relevant_inputs(max_durations, [{'index': f"{query_index}-{i}"} for i in range(len(max_durations))])
+        #     relevant_groupby_options = filter_relevant_inputs(groupby_options, [{'index': f"{query_index}-{i}"} for i in range(len(groupby_options))])
+        #     relevant_value_equalities = filter_relevant_inputs(value_equalities, [{'index': f"{query_index}-{i}"} for i in range(len(value_equalities))])
+
+
+        #     # Debugging filtered inputs
+        #     print(f"Filtered Predicates for Query {query_index}: {relevant_predicates}")
+        #     print(f"Filtered Values for Query {query_index}: {relevant_values_dropdowns}")
+        #     print(f"Filtered Attr Keys for Query {query_index}: {relevant_attr_keys}")
+        #     print(f"Filtered Value Inputs for Query {query_index}: {relevant_value_inputs}")
+        #     print(f"Filtered Value Equalities for Query {query_index}: {relevant_value_equalities}")
+
+        #     # Check if the query name is entered
+        #     if not query_name:
+        #         required_fields.append("Query Name")
+        #         warning_state = True
+
+        #     # Check if the log is selected
+        #     if not log_selector:
+        #         required_fields.append("Log")
+        #         warning_state = True
+
+        #     # Check if at least one predicate is selected
+        #     if not any([pred for pred, _ in relevant_predicates]):
+        #         required_fields.append("At least one Predicate")
+        #         warning_state = True
+
+        #     # Optimized check for missing fields based on predicates
+        #     for pred, _ in relevant_predicates:
+        #         # Common checks for attribute keys and values
+        #         if pred in ['EqToConstant', 'NotEqToConstant', 'GreaterEqualToConstant', 'LessEqualToConstant', 'GreaterThanConstant', 'LessThanConstant']:
+        #             if not relevant_attr_keys or any(attr_key is None for attr_key, _ in relevant_attr_keys):
+        #                 warning_state = True
+        #                 required_fields.append(f"Missing Attribute Key for '{pred}' Predicate")
+        #             if pred in ['EqToConstant', 'NotEqToConstant']:
+        #                 if not relevant_value_equalities or any(value_eq is None for value_eq, _ in relevant_value_equalities):
+        #                     warning_state = True
+        #                     required_fields.append(f"Missing Value for '{pred}' Predicate")
+        #             else:
+        #                 if not relevant_value_inputs or any(value_input is None for value_input, _ in relevant_value_inputs):
+        #                     warning_state = True
+        #                     required_fields.append(f"Missing Input Value for '{pred}' Predicate")
+
+        #         # Check for StartWith or EndWith
+        #         elif pred in ['StartWith', 'EndWith']:
+        #             actual_values = [val for val, _ in relevant_values_dropdowns if val is not None]
+        #             if not actual_values:
+        #                 required_fields.append(f"Missing Values for '{pred}' Predicate")
+        #                 warning_state = True
+
+        #         # Check for DurationWithin
+        #         elif pred == 'DurationWithin':
+        #             if not relevant_min_durations or any(min_dur is None for min_dur, _ in relevant_min_durations):
+        #                 required_fields.append("Missing Minimum Duration for 'DurationWithin' Predicate")
+        #                 warning_state = True
+        #             if not relevant_max_durations or any(max_dur is None for max_dur, _ in relevant_max_durations):
+        #                 required_fields.append("Missing Maximum Duration for 'DurationWithin' Predicate")
+        #                 warning_state = True
+        #             if not relevant_time_units or any(time_unit is None for time_unit, _ in relevant_time_units):
+        #                 required_fields.append("Missing Time Unit for 'DurationWithin' Predicate")
+        #                 warning_state = True
+
+        #         # Check for SumAggregate, MaxAggregate, MinAggregate
+        #         elif pred in ['SumAggregate', 'MaxAggregate', 'MinAggregate']:
+        #             if not relevant_groupby_attr_keys or any(group_attr is None for group_attr, _ in relevant_groupby_attr_keys):
+        #                 required_fields.append(f"Missing Group By Attribute Key for '{pred}' Predicate")
+        #                 warning_state = True
+        #             if not relevant_groupby_options or any(group_opt is None for group_opt, _ in relevant_groupby_options):
+        #                 required_fields.append(f"Missing Group By Option for '{pred}' Predicate")
+        #                 warning_state = True
+
+        #     # If required fields are missing, show a warning
+        #     if required_fields:
+        #         warning_message = f"Missing required fields: {', '.join(required_fields)}"
+        #         return True, warning_message, warning_state
+
+        #     # No warning is needed, return the defaults
+        #     return False, "", False  # Hide the popup and reset the button click counter
+
+
+
+        # # Background process for storing the query result
+        # @app.callback(
+        #     Output({'type': 'query-result', 'index': MATCH}, "data"),
+        #     Input({"type": "submit", "index": ALL}, "n_clicks"),
+        #     State("qname_index", "data"),
+        #     prevent_initial_call=True
+        # )
+        # def on_button_click_background(n_clicks, query_index):
+        #     if n_clicks[0] is None:
+        #         raise dash.exceptions.PreventUpdate
+
+        #     if n_clicks[0] > 0:
+        #         query_key = f'Query{query_index + 1}'
+                
+        #         # Check Redis cache first
+        #         result = get_cached_result(query_key)
+        #         if result is not None:
+        #             print(f"Loaded cached result from Redis for {query_key}")
+        #         else:
+        #             # Run predicate and cache result in Redis
+        #             result, _, _ = VelPredicate.run_predicate(self.log_view, self.conditions, query_key, 0)
+        #             if result is None or result.empty:
+        #                 return [result.to_dict('records')]
+        #             cache_query_result(query_key, result)  # Cache result in Redis
+        #             print(f"Cached result in Redis for {query_key}")
+
+        #         return [result.to_dict('records')]
+
+        #     return dash.no_update
+
+def setLogv1(self):
+        app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+        
+        app.layout = html.Div([
+            dash_table.DataTable(
+                id='datatable-interactivity',
+                columns=[
+                    {"name": i, "id": i, "selectable": True} for i in self.log.columns
+                ],
+                data=self.log.head(50).to_dict('records'),
+                page_size=20,  
+                sort_action="native",  
+                sort_mode="multi",  
+                column_selectable="multi",  
+                selected_columns=[],  
+                style_table={'overflowX': 'auto', 'color': '#081621'},  
+                # style_data={'color': '#081621'},
+            ),
+            html.Button('Assign Roles to Selected Columns', id='assign-roles-button', n_clicks=0),
+            dbc.Modal(
+                [
+                    dbc.ModalHeader("Assign Roles to Columns"),
+                    dbc.ModalBody([
+                        html.Div(id='role-assignment-container'),
+                        html.Button('Confirm Assignment', id='confirm-assignment-button', n_clicks=0)
+                    ]),
+                    dbc.ModalFooter(
+                        html.Button("Close", id="close", className="ml-auto")
+                    ),
+                ],
+                id="modal",
+                is_open=False,
+                style={'color': '#081621'}
+            ),
+            html.Div(id='update-status'),
+            dcc.Store(id='stored-columns')  # Store the column mapping
+        ])
+
+        @app.callback(
+            Output("modal", "is_open"),
+            Output("role-assignment-container", "children"),
+            Output('stored-columns', 'data'),
+            Input("assign-roles-button", "n_clicks"),
+            State('datatable-interactivity', 'selected_columns'),
+            State("modal", "is_open"),
+        )
+        def toggle_modal(n_clicks, selected_columns, is_open):
+            
+            if n_clicks > 0 and selected_columns:
+                role_inputs = []
+                role_labels = ["CASE_ID_COL", "ACTIVITY_COL", "TIMESTAMP_COL"]
+                column_map = {}
+
+                for i, col in enumerate(selected_columns[:3]):
+                    column_map[role_labels[i]] = col
+                    role_inputs.append(html.Label(f"Assign {role_labels[i]} to: {col}"))
+
+                return not is_open, role_inputs, column_map
+
+            return is_open, [], {}
+
+        @app.callback(
+            Output('update-status', 'children'),
+            Input('confirm-assignment-button', 'n_clicks'),
+            State('stored-columns', 'data')
+        )
+        def update_column_names(n_clicks, column_map):
+            '''
+            This function updates the default column names based on the selected roles.
+            '''
+            if n_clicks > 0:
+                case_id_col = column_map.get("CASE_ID_COL")
+                activity_col = column_map.get("ACTIVITY_COL")
+                timestamp_col = column_map.get("TIMESTAMP_COL")
+
+                self.changeDefaultNames(case_id_col, activity_col, timestamp_col)
+
+                return f"Updated Columns: CASE_ID_COL: {case_id_col}, ACTIVITY_COL: {activity_col}, TIMESTAMP_COL: {timestamp_col}"
+            return "No columns selected for update."
+
+        return app
+        
+        def get_min_max_duration(self):
+        '''
+        This function returns the minimum and maximum case durations.
+        '''
+        durations = self.calculate_case_durations()
+        min_duration = durations.min()
+        max_duration = durations.max()
+
+        min_duration_adjusted = max(0, min_duration)  
+        max_duration_adjusted = min(max_duration, max_duration)  
+
+        return min_duration_adjusted, max_duration_adjusted
+
+    def calculate_case_durations(self):def calculate_case_durations(self):
+        duration_df = self.df.groupby(self.CASE_ID_COL)[self.TIMESTAMP_COL].agg(['min', 'max'])
+        duration_df['duration'] = (duration_df['max'] - duration_df['min']).dt.total_seconds()
+        return duration_df['duration']
+        
+        def getPredicates(self):
+        '''
+        This function retrieves all available predicates.
+        '''
+        self.predicates = [pred for pred in logview.predicate.__all__ if pred not in ['Query', 'Union', 'CountAggregate']]
+        return self.predicates
+        
+@app.callback(
+            Output({'type': 'predicate-info', 'index': MATCH}, "children"),
+            Input({'type': 'radios', 'index': MATCH}, "value")
+        )
+        def update_predicate_info(value):
+            if value is not None:
+                descriptions = {
+                    'EqToConstant': "Keeps cases that contain at least an event with the given attribute equal to a constant value.",
+                    'NotEqToConstant': "Keeps cases that do not contain any event with the given attribute equal to a constant value.",
+                    'GreaterEqualToConstant': "Keeps cases that contain at least an event with the given attribute greater than or equal to a constant value.",
+                    'LessEqualToConstant': "Keeps cases that contain at least an event with the given attribute lower than or equal to a constant value.",
+                    'GreaterThanConstant': "Keeps cases that contain at least an event with the given attribute greater than a constant value.",
+                    'LessThanConstant': "Keeps cases that contain at least an event with the given attribute lower than a constant value.",
+                    'StartWith': "Keeps cases starting with the specified activities.",
+                    'EndWith': "Keeps cases ending with a given activity.",
+                    'DurationWithin': "Keeps cases with durations within a specified range in seconds.",
+                    'SumAggregate': "Sums the values of the specified attribute for the specified group of columns.",
+                    'MaxAggregate': "Finds the maximum value of the specified attribute for the specified group of columns.",
+                    'MinAggregate': "Finds the minimum value of the specified attribute for the specified group of columns."
+                }
+                
+                icon_map = {
+                    'EqToConstant': 'antd-carry-out',
+                    'NotEqToConstant': 'antd-not-equal',
+                    'GreaterEqualToConstant': 'antd-greater-than-equal',
+                    'LessEqualToConstant': 'antd-less-than-equal',
+                    'GreaterThanConstant': 'antd-greater-than',
+                    'LessThanConstant': 'antd-less-than',
+                    'StartWith': 'antd-play',
+                    'EndWith': 'antd-stop',
+                    'DurationWithin': 'antd-clock',
+                    'SumAggregate': 'antd-sum',
+                    'MaxAggregate': 'antd-arrow-up',
+                    'MinAggregate': 'antd-arrow-down'
+                }
+
+                description = descriptions.get(value, "No description available.")
+                icon_class = icon_map.get(value, 'antd-info-circle')
+
+                return html.Div([
+                    fac.AntdIcon(
+                                id='icon',
+                                icon='antd-info-circle-two-tone',
+                                style={'marginRight': '10px'}
+                            ),
+
+                    description
+                ], style={'color': 'black', 'fontSize': '15px', 'display': 'flex', 'alignItems': 'center', 'paddingBottom': '20px','fontWeight':'500'}, className="font-weight-bold")
+            return html.Div()
+
+
+
+        # @app.callback(
+        #     Output('tabs', 'items', allow_duplicate=True),
+        #     Output('tabs', 'defaultActiveKey', allow_duplicate=True),
+        #     Input('tabs', 'latestDeletePane'),
+        #     State('tabs', 'items'),
+        #     State('tabs', 'activeKey'),
+        #     prevent_initial_call=True
+        # )
+        # def delete_query_tab(latestDeletePane, current_tabs, activeKey):
+        #     if latestDeletePane is None:
+        #         raise dash.exceptions.PreventUpdate
+            
+        #     updated_tabs = [tab for tab in current_tabs if tab['key'] != latestDeletePane]
+
+        #     if latestDeletePane == activeKey:
+        #         new_active_key = updated_tabs[0]['key'] if updated_tabs else None
+        #     else:
+        #         new_active_key = dash.no_update
+
+        #     return updated_tabs, new_active_key
+                # @app.callback(
+        #     Output('tabs', 'items', allow_duplicate=True),
+        #     Output('tabs', 'defaultActiveKey', allow_duplicate=True),
+        #     Input('add-query-button', 'nClicks'),
+        #     State('tabs', 'items'),
+        #     prevent_initial_call=True
+        # )
+        # def add_query_tab(nClicks, current_tabs):
+        #     ctx = dash.callback_context
+
+        #     # Avoid unnecessary processing if no clicks happened
+        #     if not ctx.triggered or nClicks is None:
+        #         raise dash.exceptions.PreventUpdate
+
+        #     new_index = len(current_tabs)
+        #     new_tab = self.generate_query_tab(new_index)
+        #     current_tabs.append(new_tab)
+
+        #     return current_tabs, f'tab-{new_index}'
+
+        # @app.callback(
+        #     Output('qname_index', 'data'),
+        #     Input('tabs', 'activeKey'),
+        #     prevent_initial_call=True
+        # )
+        # def update_query_index(active_tab_key):
+        #     active_index = int(active_tab_key.split('-')[-1])
+        #     return active_index
+

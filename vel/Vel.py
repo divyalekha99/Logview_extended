@@ -1,5 +1,5 @@
 from dash import jupyter_dash
-from dash import Dash, dash_table, dcc, html, Input, Output, callback, State
+from dash import Dash, dash_table, dcc, html, Input, Output, callback, State, clientside_callback, no_update
 import pandas as pd 
 import pm4py
 import logview
@@ -18,9 +18,18 @@ import webbrowser
 from threading import Timer
 import constants
 import json
+from functools import lru_cache
+from flask import Flask
+from redis import Redis
+from io import StringIO
+import warnings
+from contextlib import redirect_stdout
+import io
 
 
 class Vel:
+
+
     def __init__(self, logName, fileType=".csv"):
         parent_dir = os.path.dirname(os.getcwd())
         self.logPath = os.path.join(parent_dir, "notebooks", "dataset", logName + fileType)
@@ -35,16 +44,20 @@ class Vel:
         self.num_events = 0
         self.predicate_categories = {
                 "Activity-Based": ["StartWith", "EndWith"],
-                "Attribute-Based": ["EqToConstant", "NotEqToConstant"],
+                "Attribute-Based": ["EqToConstant =", "NotEqToConstant ≠"],
                 "Time-Based": ["DurationWithin"],
-                "Threshold-Based": ["GreaterEqualToConstant", "LessEqualToConstant", "GreaterThanConstant", "LessThanConstant"],
-                "Aggregate-Based": ["SumAggregate", "MaxAggregate", "MinAggregate"],
+                "Numerical-Based": ["LessThanConstant <", "GreaterThanConstant >", "LessEqualToConstant ≤", "GreaterEqualToConstant ≥"],
+                "Aggregate-Based": ["MinAggregate", "MaxAggregate", "SumAggregate",  ],
             }
-        # self.path = 'http://127.0.0.1:8051'
-        # print("Dash App Running on: ", self.path)
+        self.query_tab_cache = {}
+        self.tab_content_cache = {}
 
 
     def initialize_query(self, index):
+        ''' 
+        This function initializes the query based on the index.
+        '''
+
         query_key = f'Query{index + 1}'
         if query_key not in self.conditions:
             self.conditions[query_key] = {
@@ -55,6 +68,10 @@ class Vel:
             }
 
     def update_condition(self, index, condition_index, field, value):
+        '''
+        This function updates the condition based on the field and value.
+        '''
+
         query_key = f'Query{index + 1}'
         if query_key in self.conditions:
             conditions = self.conditions[query_key]['conditions']
@@ -73,61 +90,56 @@ class Vel:
 
     
     def changeDefaultNames(self, caseId, activity, timestamp):
+        '''
+        This function changes the default column names.
+        '''
+
         self.CASE_ID_COL = caseId
         self.ACTIVITY_COL = activity
         self.TIMESTAMP_COL = timestamp
     
     def initLogView(self):
+        '''
+        This function initializes the log view.
+        '''
+
         self.log = pm4py.format_dataframe(self.df, case_id=self.CASE_ID_COL, activity_key=self.ACTIVITY_COL, timestamp_key=self.TIMESTAMP_COL)
         self.log_view = LogViewBuilder.build_log_view(self.log)
         return self.log_view
 
-    def calculate_case_durations(self):
-        duration_df = self.df.groupby(self.CASE_ID_COL)[self.TIMESTAMP_COL].agg(['min', 'max'])
-        duration_df['duration'] = (duration_df['max'] - duration_df['min']).dt.total_seconds()
-        return duration_df['duration']
-
-    def get_min_max_duration(self):
-        durations = self.calculate_case_durations()
-        min_duration = durations.min()
-        max_duration = durations.max()
-
-        min_duration_adjusted = max(0, min_duration)  
-        max_duration_adjusted = min(max_duration, max_duration)  
-
-        return min_duration_adjusted, max_duration_adjusted
-
    
     def get_predicate_class(self, predicate_name):
-        predicate_class_mappping = {
-            'EqToConstant': EqToConstant,
-            'NotEqToConstant': NotEqToConstant,
-            'GreaterEqualToConstant': GreaterEqualToConstant,
-            'LessEqualToConstant': LessEqualToConstant,
-            'GreaterThanConstant': GreaterThanConstant,
-            'LessThanConstant': LessThanConstant,
-            'StartWith': StartWith,
-            'EndWith': EndWith,
-            'DurationWithin': DurationWithin,
-            'SumAggregate': SumAggregate,
-            # 'CountAggregate': CountAggregate,
-            'MaxAggregate': MaxAggregate,
-            'MinAggregate': MinAggregate
-        }
-        if predicate_name in predicate_class_mappping:
-            return predicate_class_mappping[predicate_name]
+        '''
+        This function returns the predicate class based on the predicate name.
+        '''
+
+        predicate_class_mapping = {
+                "StartWith": StartWith,
+                "EndWith": EndWith,
+                "EqToConstant =": EqToConstant,
+                "NotEqToConstant ≠": NotEqToConstant,
+                "GreaterEqualToConstant ≥": GreaterEqualToConstant,
+                "GreaterThanConstant >": GreaterThanConstant,
+                "LessThanConstant <": LessThanConstant,
+                "LessEqualToConstant ≤": LessEqualToConstant,
+                "DurationWithin": DurationWithin,
+                "SumAggregate": SumAggregate,
+                "MaxAggregate": MaxAggregate,
+                "MinAggregate": MinAggregate
+            }
+        if predicate_name in predicate_class_mapping:
+            return predicate_class_mapping[predicate_name]
         else:
             raise ValueError(f"No class found for value: {predicate_name}")
           
-     
-    def getPredicates(self):
-        self.predicates = [pred for pred in logview.predicate.__all__ if pred not in ['Query', 'Union', 'CountAggregate']]
-        return self.predicates
 
 
     def setLog(self):
-        app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+        '''
+        This function sets up the log view UI.
+        '''
 
+        app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
         
         app.layout = html.Div([
             dash_table.DataTable(
@@ -135,131 +147,131 @@ class Vel:
                 columns=[
                     {"name": i, "id": i, "selectable": True} for i in self.log.columns
                 ],
-                data=self.log.head(100).to_dict('records'),
-                page_size=10,  
+                data=self.log.head(50).to_dict('records'),
+                page_size=15,  
                 sort_action="native",  
                 sort_mode="multi",  
                 column_selectable="multi",  
                 selected_columns=[],  
-                style_table={'overflowX': 'auto'},  
+                style_table={'overflowX': 'auto', 'color': '#081621', 'fontSize': '14px'},  
             ),
-            html.Button('Assign Roles to Selected Columns', id='assign-roles-button', n_clicks=0),
-            dbc.Modal(
-                [
-                    dbc.ModalHeader("Assign Roles to Columns"),
-                    dbc.ModalBody([
-                        html.Div(id='role-assignment-container'),
-                        html.Button('Confirm Assignment', id='confirm-assignment-button', n_clicks=0)
-                    ]),
-                    dbc.ModalFooter(
-                        html.Button("Close", id="close", className="ml-auto")
-                    ),
-                ],
+            fac.AntdButton('Assign Roles to Selected Columns', id='assign-roles-button', nClicks=0),
+            fac.AntdModal(
                 id="modal",
-                is_open=False,
+                title="Assign Roles to Columns",
+                renderFooter=True,
+                okText="Confirm",
+                cancelText="Cancel",
+                okButtonProps={'type': 'primary'},
+                children=[
+                    html.Div(id='role-assignment-container'),
+                ],
+                locale='en-us',
             ),
-            html.Div(id='update-status')
+            html.Div(id='update-status', style={'color': '#081621', 'fontFamily': 'Noto Sans, sans-serif'}, className="mt-3"),
+            dcc.Store(id='stored-columns')  
         ])
 
-        
         @app.callback(
-            Output("modal", "is_open"),
+            Output("modal", "visible", allow_duplicate=True),
             Output("role-assignment-container", "children"),
-            Input("assign-roles-button", "n_clicks"),
+            Output('stored-columns', 'data'),
+            Input("assign-roles-button", "nClicks"),
             State('datatable-interactivity', 'selected_columns'),
-            State("modal", "is_open"),
+            State("modal", "visible"),
+            prevent_initial_call=True
         )
         def toggle_modal(n_clicks, selected_columns, is_open):
+            '''
+            This function toggles the modal and displays the role assignment dropdowns.
+            '''
             if n_clicks > 0 and selected_columns:
                 role_inputs = []
                 role_labels = ["CASE_ID_COL", "ACTIVITY_COL", "TIMESTAMP_COL"]
-                for i, col in enumerate(selected_columns[:3]):  
-                    role_inputs.append(html.Div([
-                        html.Label(f"Assign {role_labels[i]} to: {col}"),
-                        dcc.Input(id=f'input-role-{i}', type='hidden', value=col),
-                    ]))
-                return not is_open, role_inputs
-            return is_open, []
 
-        # Callback to update column names based on confirmed assignment
+                for col in selected_columns:
+                    dropdown = fac.AntdSelect(
+                        options=[{"label": label, "value": label} for label in role_labels],
+                        placeholder=f"Assign a role to {col}",
+                        id={'type': 'role-dropdown', 'column': col},
+                        style={'width': '100%'}
+                    )
+                    role_inputs.append(html.Div([html.Label(col), dropdown]))
+
+                return not is_open, role_inputs, {}
+
+            return is_open, [], {}
+
         @app.callback(
             Output('update-status', 'children'),
-            Input('confirm-assignment-button', 'n_clicks'),
-            [State(f'input-role-{i}', 'value') for i in range(3)]
+            Output("modal", "visible", allow_duplicate=True),
+            Input('modal', 'okCounts'),
+            State({'type': 'role-dropdown', 'column': ALL}, 'value'),
+            State({'type': 'role-dropdown', 'column': ALL}, 'id'),
+            prevent_initial_call=True
         )
-        def update_column_names(n_clicks, case_id_col, activity_col, timestamp_col):
-            if n_clicks > 0:
+        def update_column_names(okCounts, selected_roles, selected_columns):
+            '''
+            This function updates the default column names based on the selected roles.
+            '''
+
+            if okCounts > 0 and selected_roles:
+                # Create a mapping of roles to their assigned columns
+                column_map = {
+                    "CASE_ID_COL": None,
+                    "ACTIVITY_COL": None,
+                    "TIMESTAMP_COL": None
+                }
+
+                for role, col in zip(selected_roles, selected_columns):
+                    if role is not None:
+                        column_map[role] = col['column']
+
+                case_id_col = column_map["CASE_ID_COL"]
+                activity_col = column_map["ACTIVITY_COL"]
+                timestamp_col = column_map["TIMESTAMP_COL"]
+                
                 self.changeDefaultNames(case_id_col, activity_col, timestamp_col)
-                return f"Updated Columns: CASE_ID_COL: {case_id_col}, ACTIVITY_COL: {activity_col} , TIMESTAMP_COL: {timestamp_col}"
-            return "No columns selected for update."
+                
+                # Return the updated columns in the status message
+                return f"Updated Columns: CASE_ID_COL: {case_id_col}, ACTIVITY_COL: {activity_col}, TIMESTAMP_COL: {timestamp_col}", False
+            
+            return "No columns selected for update.", False
+
+        @app.callback(
+            Output("modal", "visible"),
+            Input('modal', 'cancelCounts'),
+            prevent_initial_call=True
+        )
+        def close_modal_on_cancel(cancelCounts):
+            '''
+            This function closes the modal when the cancel button is clicked.
+            '''
+            return False
 
         return app
-
-    def get_predicate_groupings(self):
-        return [
-            {"label": "Attribute-Based Filters", "options": [
-                {"label": "Equals to Constant", "value": "EqToConstant"},
-                {"label": "Not Equals to Constant", "value": "NotEqToConstant"}
-            ]},
-            {"label": "Threshold-Based Filters", "options": [
-                {"label": "Greater or Equal to Constant", "value": "GreaterEqualToConstant"},
-                {"label": "Less or Equal to Constant", "value": "LessEqualToConstant"},
-                {"label": "Greater Than Constant", "value": "GreaterThanConstant"},
-                {"label": "Less Than Constant", "value": "LessThanConstant"}
-            ]},
-            {"label": "Aggregate-Based Filters", "options": [
-                {"label": "Sum of Values", "value": "SumAggregate"},
-                {"label": "Maximum of Values", "value": "MaxAggregate"},
-                {"label": "Minimum of Values", "value": "MinAggregate"}
-            ]},
-            {"label": "Event-Based Filters", "options": [
-                {"label": "Starts with Specific Event", "value": "StartWith"},
-                {"label": "Ends with Specific Event", "value": "EndWith"}
-            ]},
-            {"label": "Time-Based Filters", "options": [
-                {"label": "Duration Within Specified Range", "value": "DurationWithin"}
-            ]}
-        ]
     
-    # def get_all_source_logs(self):
-    #     """
-    #     Retrieve all unique source logs used in the evaluations.
-    #     """
-    #     source_logs = set()
-
-    #     # Access the query registry from the LogView instance
-    #     query_registry = self.log_view.query_registry
-    #     print("Query Registry: ", query_registry)
-
-    #     # Iterate over all registered evaluations
-    #     for result_set_id in query_registry.get_registered_result_set_ids():
-    #         evaluation = query_registry.get_evaluation(result_set_id)
-    #         source_log_name = evaluation['source_log'].name
-    #         source_logs.add(source_log_name)
-
-    #     return list(source_logs)
-
     def get_available_logs(self):
-        """
+        '''
         Retrieves all available logs (initial source log, result sets, complements).
-        """
-        # Gather initial source log
-        # available_logs = [self.log_view.query_registry.get_initial_source_log().name]
-        
-        # Add all result sets and their complements
+        '''
+
         available_logs = list(self.log_view.result_set_name_cache.keys())
         
         return available_logs
 
     def generate_grouped_radio_options(self, predicate_categories):
-        # Dictionary containing descriptions for each predicate
+        '''
+        Generates grouped radio options for the predicate categories.
+        '''
+
         predicate_descriptions = {
             'EqToConstant': "Keeps cases that contain at least an event with the given attribute equal to a constant value.",
             'NotEqToConstant': "Keeps cases that do not contain any event with the given attribute equal to a constant value.",
-            'GreaterEqualToConstant': "Keeps cases that contain at least an event with the given attribute greater than or equal to a constant value.",
-            'GreaterThanConstant': "Keeps cases that contain at least an event with the given attribute greater than a constant value.",
-            'LessEqualToConstant': "Keeps cases that contain at least an event with the given attribute lower than or equal to a constant value.",
-            'LessThanConstant': "Keeps cases that contain at least an event with the given attribute lower than a constant value.",
+            'GreaterEqualToConstant ≥': "Keeps cases that contain at least an event with the given attribute greater than or equal to a constant value.",
+            'GreaterThanConstant >': "Keeps cases that contain at least an event with the given attribute greater than a constant value.",
+            'LessEqualToConstant ≤': "Keeps cases that contain at least an event with the given attribute lower than or equal to a constant value.",
+            'LessThanConstant <': "Keeps cases that contain at least an event with the given attribute lower than a constant value.",
             'StartWith': "Keeps cases starting with the specified activities.",
             'EndWith': "Keeps cases ending with a given activity.",
             'DurationWithin': "Keeps cases with durations within a specified range in seconds.",
@@ -274,21 +286,20 @@ class Vel:
             options.append({
                 'label': fac.AntdText(category, strong=True),
                 'value': f'{category}-header',
-                'disabled': True
+                'disabled': True,
+
             })
 
             for predicate in predicates:
                 options.append({
                     'label': fac.AntdTooltip(
                         title=predicate_descriptions.get(predicate, "No description available."),
-                        # color="#ffffff",  
                         overlayStyle={
                             'padding': '2px',  
                             'fontSize': '15px',  
                             'color': '#2c3e50',  
                             'borderRadius': '10px',  
                             'boxShadow': '0px 6px 10px rgba(0, 0, 0, 0.12)',  
-                            # 'backgroundImage': 'linear-gradient(135deg, #f8f9fa 10%, #ffffff 100%)',  
                             'textShadow': '0.5px 0.5px 2px rgba(0, 0, 0, 0.05)'  
                         },
                         children=fac.AntdText(predicate, style={'color': '#081621'})  
@@ -300,7 +311,12 @@ class Vel:
 
 
 
+    @lru_cache(maxsize=128)
     def generate_query_tab(self, index):
+        '''
+        This function generates a query tab for the AntdTabs component.
+        '''
+
         self.initialize_query(index)
 
         radio_options = self.generate_grouped_radio_options(self.predicate_categories)
@@ -309,7 +325,7 @@ class Vel:
         tab_content = html.Div([
             # Query Name Input
             dbc.Row([
-                dbc.Col(fac.AntdText('Query Name:', className="font-weight-bold"), width=1, align="center"),
+                dbc.Col(fac.AntdText('Query Name:', className="font-weight-bold"), width=2, align="center", style={'width': '9vw'}),
                 dbc.Col(fac.AntdInput(
                     id={'type': 'query_name', 'index': index},
                     placeholder='Enter a value', size='middle'),
@@ -336,8 +352,7 @@ class Vel:
                                 style={'display': 'inline-flex', 'marginLeft': '10px'}
                             ),
                             id = "tooltip-label",
-                            title="Allows the user to assign a descriptive tag to a result set. Different result sets can be tagged with the same label ",  # Tooltip content
-                            # color="#ffffff",  # Pure white background with a gradient
+                            title="Assigns a descriptive tag to the result set. Different result sets can be tagged with the same label ",
                                 placement="top",  
                                 trigger="hover",
                                 overlayStyle={
@@ -345,8 +360,7 @@ class Vel:
                                     'fontSize': '15px',  
                                     'color': '#2c3e50',  
                                     'borderRadius': '10px',  
-                                    'boxShadow': '0px 6px 10px rgba(0, 0, 0, 0.12)',  
-                                    # 'backgroundImage': 'linear-gradient(135deg, #f8f9fa 10%, #ffffff 100%)',  
+                                    'boxShadow': '0px 6px 10px rgba(0, 0, 0, 0.12)',   
                                     'textShadow': '0.5px 0.5px 2px rgba(0, 0, 0, 0.05)'  
                                 },
                             ),
@@ -365,32 +379,29 @@ class Vel:
             ], className="mb-4 mt-4", align='center'),
 
             html.Div(id={'type': 'condition-container', 'index': index},
-                    style={'maxHeight': '30vh', 'overflowY': 'auto'},
+                    className="condition-container",
                     children=[html.Div([
                         # Query Condition Inputs
                         dbc.Row([
-                            dbc.Col(fac.AntdText(f'Condition {0 + 1}:', className="font-weight-bold"), width=1, align="center", ),
+                            dbc.Col(fac.AntdText(f'Condition {0 + 1}:', className="font-weight-bold"), width=2, align="center", style={'width': '9vw'}),
                             dbc.Col(
                                 fac.AntdRadioGroup(
                                     options=radio_options,
                                     id={'type': 'radios', 'index': f'{index}-{0}'},
                                     optionType='button',
-                                    buttonStyle='solid',
-                                    style={'flexWrap': 'wrap',}
+                                    buttonStyle='outline',
+                                    className="equal-width-buttons custom-disabled-radio",
                                 ),className='radio-group-container',
-                                width=8, align='start' ,style={'paddingLeft': '0vw'}
+                                width=10, align='start' ,style={'paddingLeft': '0vw', 'width': '55vw'}
                             ),
-
+                        
                         ], className="mb-4 mt-4"),
-
-                        dbc.Row([
-                            dbc.Col(html.Div(id={'type': 'predicate-info', 'index': f'{index}-{0}'}))
-                        ], className="mb-4 mt-4",align='center'),
 
                         # Additional Inputs for Each Condition
                         dbc.Row([
                             dbc.Col(html.Div(id={'type': 'Query_input', 'index': f'{index}-{0}'}))
                         ], className="mb-4 mt-4"),
+                        dcc.Store(id='scroll-trigger'),
                     ])]),
 
             # Add/Remove Condition Buttons
@@ -409,10 +420,13 @@ class Vel:
                 ),
             ], className="mb-4 mt-4"),
 
+
             # Query Display Area
             dbc.Row([
                 dbc.Col(html.Div(id={'type': 'Query_display', 'index': index})),
-                dbc.Col(fac.AntdSelect(id={'type':'log_selector', 'index': index}, options=[{'label': log, 'value': log} for log in self.get_available_logs()],
+                dbc.Col(fac.AntdSelect(id={'type':'log_selector', 'index': index},
+                        autoSpin=True,
+                        options=[{'label': log_name, 'value': log_name} for log_name in self.get_available_logs()],
                         placeholder="Select a log", size='middle', style={'width':'100%', 'height':'40px'}), width=2),
                 dbc.Col(
                     dbc.Button(
@@ -423,15 +437,15 @@ class Vel:
                         id={'type': 'submit', 'index': index},
                         type='primary',
                         n_clicks=0,
+                        # disabled=True,
                         className="btn-primary"),
-                    width="auto", align="start"  # , style={'paddingBottom': '40px'}
+                    width="auto", align="start"  
                 )
             ], className="mb-4 mt-4", style={'marginTop': '50px'}),
 
             fac.AntdSkeleton(
                     dbc.Row([
                         dbc.Col(
-                            html.Div(
                                 id={'type': 'predicate_output', 'index': index}, 
                                 style={
                                     'overflowX': 'auto',
@@ -440,23 +454,50 @@ class Vel:
                                     'borderRadius': '5px',
                                     'minHeight': '15vh'
                                 }
-                            )
                         )
                     ], className="mb-4 mt-4"),
                     active=True,
                     paragraph={'rows': 7, 'width': '50%'},
             ),
 
+            # Popup for Warnings with Icon
+            fac.AntdPopupCard(
+                id={'type': 'warning-popup', 'index': index},
+                title=html.Span([
+                    fac.AntdIcon(icon="antd-warning", style={'marginRight': '5px', 'marginLeft': '2px'}),  # Small icon
+                    'Warning'
+                ]),
+                visible=False,
+                children=[
+                    fac.AntdParagraph(id={'type': 'warning-message', 'index': index})
+                ]
+            ),
 
-            # Hidden Store for Tracking Conditions
+            fac.AntdPopupCard(
+                id={'type': 'warning-popup-ui', 'index': index},
+                title=html.Span([
+                    fac.AntdIcon(icon="antd-warning", style={'marginRight': '5px', 'marginLeft': '2px'}),  # Small icon
+                    'Warning'
+                ]),
+                visible=False,
+                children=[
+                    fac.AntdParagraph(id={'type': 'warning-message-ui', 'index': index})
+                ]
+            ),
+
+            
+            # Hidden Store
             dcc.Store(id={'type': 'condition-store', 'index': index}, data=0),
             dcc.Store(id={'type': 'qname-store', 'index': index}),
             dcc.Store(id={'type': 'label-store', 'index': index}, data=[]),
             dcc.Store(id={'type': 'row-number-store', 'index': index}, data=10),
             dcc.Store(id={'type': 'query-result', 'index': index}),
+            dcc.Store(id={'type': 'warning-state', 'index': index}, data=True),
+            dcc.Store(id={'type': 'required-flag', 'index': index}, data=False),
+             
 
             
-        ], style={'padding': '55px', 'maxHeight': '60vh'})
+        ], style={'padding-inline': '7vw', 'maxHeight': '60vh'})
 
         # Return the tab item dictionary for AntdTabs
         return {
@@ -467,19 +508,25 @@ class Vel:
         }
 
     def Query_Builder_v5(self):
+        '''
+        This function generates the Query Builder UI.
+        '''
 
-        app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP,"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css",
+        server = Flask(__name__)
+        redis_cache = Redis(host='localhost', port=6379, db=0)  
+
+        # Initialize Dash app with Flask server
+        app = Dash(__name__, server=server, external_stylesheets=[dbc.themes.BOOTSTRAP,"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css",
                 "https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css"])
 
+
+        # app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP,"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css",
+        #         "https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css"])
+        
+        self.initialize_query(0)
         app.layout = html.Div(
+            className="app-container mb-4",
             style={
-                'backgroundColor': '#bad2ea',
-                'color': '#081621',
-                # 'padding': '20px',
-                'display': 'flex',
-                # 'justifyContent': 'center',  # Centers the card horizontally
-                # 'alignItems': 'center',  # Centers the card vertically
-                'minHeight': '90vh',  # Ensures full viewport height
             },
             children=[
                 dbc.Card(
@@ -526,14 +573,14 @@ class Vel:
                                     'borderBottom': '3px solid #dae9f6',
                                     'position': 'sticky',
                                     'top': '0',
-                                    'zIndex': '1000',  # Ensures it stays on top of other elements
+                                    'zIndex': '1000',  
                                     'backgroundColor': 'white'
                                 })
                             ]),
 
                             # Drawer for Summary
                             fac.AntdDrawer(
-                                title="Summary Information",
+                                title="Query Summary",
                                 id="summary-drawer",
                                 placement="right",
                                 visible=False,
@@ -552,7 +599,6 @@ class Vel:
                                 ],
                                 tabBarRightExtraContent=fac.AntdTooltip(
                                     title="Add Query",
-                                    # color="#ffffff",
                                     placement="top",
                                     trigger="hover",
                                     overlayStyle={
@@ -561,7 +607,6 @@ class Vel:
                                         'color': '#2c3e50',
                                         'borderRadius': '10px',
                                         'boxShadow': '0px 6px 10px rgba(0, 0, 0, 0.12)',
-                                        # 'backgroundImage': 'linear-gradient(135deg, #f8f9fa 10%, #ffffff 100%)',
                                         'textShadow': '0.5px 0.5px 2px rgba(0, 0, 0, 0.05)'
                                     },
                                     children=fac.AntdIcon(
@@ -572,123 +617,111 @@ class Vel:
                                 ),
 
 
-                            # # AntdTabs for Queries
-                            # fac.AntdTabs(
-                            # id="tabs",
-                            # type="editable-card",
-                            # style={'paddingInline': '40px'},
-                            # items=[
-                            #     self.generate_query_tab(0)
-                            # ],
-                            # tabBarRightExtraContent=fac.AntdTooltip(
-                            #     fac.AntdIcon(
-                            #         id='add-query-button',
-                            #         nClicks=0,
-                            #         icon='antd-plus-circle-two-tone',
-                            #         style={'fontSize': 20, 'cursor': 'pointer'},
-                            #     ),
-                            #     id = "tooltip-label",
-                            #     title="Add Query",
-                            #     color="#ffffff",  # Pure white background with a gradient
-                            #         placement="top",  
-                            #         trigger="hover",
-                            #         overlayStyle={
-                            #             'padding': '2px',  
-                            #             'fontSize': '15px',  
-                            #             'color': '#2c3e50',  
-                            #             'borderRadius': '10px',  
-                            #             'boxShadow': '0px 6px 10px rgba(0, 0, 0, 0.12)',  
-                            #             'backgroundImage': 'linear-gradient(135deg, #f8f9fa 10%, #ffffff 100%)',  
-                            #             'textShadow': '0.5px 0.5px 2px rgba(0, 0, 0, 0.05)'  
-                            #         },
-                            # ),
-
-                            # tabBarRightExtraContent = dbc.Button(
-                            #                 [
-                            #                 html.I(className="bi bi-plus-lg", style={'marginRight': '5px'}),
-                            #                 "Add Query",
-                            #                 ],
-                            #                 id='add-query-button',
-                            #                 color="primary",
-                            #                 n_clicks=0,
-                            #                 style={'marginLeft': 'auto'}
-                            #         ),
-                            
-                            # fac.AntdButton(
-                            #             "Add Query", 
-                            #             id='add-query-button', 
-                            #             nClicks=0,
-                            #             type="dashed", 
-                            #             icon=fac.AntdIcon(icon="antd-plus")
-                            #         ), 
                             defaultActiveKey='tab-0',
                             className="mb-4"
                             ),
 
+                           
                             dcc.Store(id='qname_index', data=0),
 
-                        ], className="card-content", style={})  # Internal scrolling
+                        ], className="card-content", style={})  
                     ]), 
-                    className="mb-4", 
+                    className="mb-4 card-container", 
                     style={
-                        'padding': '20px', 
-                        'margin': '10px auto',  # Reduced margin-top to bring it closer to the top
-                        'backgroundColor': 'white', 
-                        'boxShadow': '0 4px 8px 0 rgba(0,0,0,0.2)', 
-                        'borderRadius': '25px', 
-                        'opacity': '0.9',
-                        'maxHeight': '100%',  # Limit height to viewport height minus some margin
-                        # 'overflowY': 'hidden'  # Prevent overflow of the entire card
+                        
                     }
                 )
             ]
         )
+        
 
-
-        self.initialize_query(0)
-
+        
+        # Callback for handling scroll to the last added condition
         @app.callback(
-            # Output('log-dropdown', 'options'),
-            Output({'type': 'log_selector', 'index': MATCH}, 'options'),
-            # Input({'type':'submit', 'index': MATCH}, 'n_clicks')
-            Input({'type': 'predicate_output', 'index': MATCH}, "children"),
+            Output('scroll-trigger', 'data'),
+            Input({'type': 'add-condition-button', 'index': dash.dependencies.ALL}, 'n_clicks'),
+            prevent_initial_call=True
         )
-        def update_log_dropdown(children):
-            if children is not None:
-                logs = self.get_available_logs()
-                print("Available Logs:", logs)
-                return [{'label': log_name, 'value': log_name} for log_name in logs]
+        def trigger_scroll(n_clicks):
+            '''
+            This function triggers a scroll to the last added condition.
+            '''
+
+            if any(n_clicks) and sum(n_clicks) > 0:
+                return "scroll"
             return dash.no_update
 
+
         @app.callback(
-            Output('tabs', 'items', allow_duplicate=True),
-            Output('tabs', 'defaultActiveKey', allow_duplicate=True),
+            Output({'type': 'log_selector', 'index': ALL}, 'options'),
+            Input({'type': 'predicate_output', 'index': ALL}, 'children'),
+            State("qname_index", 'data'),
+            prevent_initial_call=True
+        )
+        def update_log_dropdown_on_interaction(query_result, qname_index):
+            '''
+            This function updates the log dropdown options based on the query result.
+            '''
+
+            logs = self.get_available_logs()
+            options = [{'label': log_name, 'value': log_name} for log_name in logs]
+            return [options for _ in query_result]
+
+
+        @app.callback(
+            [
+                Output('tabs', 'items', allow_duplicate=True),
+                Output('tabs', 'defaultActiveKey', allow_duplicate=True),
+                
+            ],
             Input('add-query-button', 'nClicks'),
             State('tabs', 'items'),
             prevent_initial_call=True
         )
         def add_query_tab(nClicks, current_tabs):
-            ctx = dash.callback_context
+            '''
+            This function adds a new query tab.
+            '''
 
-            # Avoid unnecessary processing if no clicks happened
-            if not ctx.triggered or nClicks is None:
+            if nClicks is None:
                 raise dash.exceptions.PreventUpdate
 
             new_index = len(current_tabs)
+
+            # Generate a new tab
             new_tab = self.generate_query_tab(new_index)
+
+            key = f'Query{new_index + 1}'
+
+            self.tab_content_cache[key] = new_tab 
+            
+            print(type(self.tab_content_cache), self.tab_content_cache)
+
             current_tabs.append(new_tab)
+
 
             return current_tabs, f'tab-{new_index}'
 
+        
         @app.callback(
             Output('qname_index', 'data'),
             Input('tabs', 'activeKey'),
             prevent_initial_call=True
         )
         def update_query_index(active_tab_key):
+            '''
+            This function updates the query index based on the active tab.
+            '''
+
             active_index = int(active_tab_key.split('-')[-1])
+            
+            cached_tab = self.query_tab_cache.get(active_index)
+            if cached_tab:
+                return active_index
+            
             return active_index
-        
+
+
         @app.callback(
             Output('tabs', 'items', allow_duplicate=True),
             Output('tabs', 'defaultActiveKey', allow_duplicate=True),
@@ -698,17 +731,104 @@ class Vel:
             prevent_initial_call=True
         )
         def delete_query_tab(latestDeletePane, current_tabs, activeKey):
+            '''
+            This function deletes a query tab and reindexes the remaining tabs and conditions.
+            '''
+
+            
+
             if latestDeletePane is None:
                 raise dash.exceptions.PreventUpdate
-            
+
+              
+            index_to_remove = int(latestDeletePane.split('-')[-1])
+
+              
+            self.query_tab_cache.pop(index_to_remove, None)
+
+              
+            query_key_to_remove = f"Query{index_to_remove + 1}"
+            if query_key_to_remove in self.conditions:
+                self.conditions.pop(query_key_to_remove, None)
+
+              
             updated_tabs = [tab for tab in current_tabs if tab['key'] != latestDeletePane]
 
+              
+            new_conditions = {}
+            updated_content = {}    
+
+            def update_tab_content(old_query_key, new_query_key, tab_index):
+                """
+                This function updates the content of a tab after deletion and remapping.
+                It renames the child component IDs and state data accordingly.
+                """
+                if old_query_key not in self.tab_content_cache:
+                    raise KeyError(f"No content found for {old_query_key}")
+
+                tab_content = self.tab_content_cache[old_query_key]    
+
+                  
+                for element in tab_content['children']:
+                      
+                    print(element)
+                    if isinstance(element, dict):
+                        element_id = element.get('id')
+                        
+                        if isinstance(element_id, dict) and 'index' in element_id:
+                            index = element_id['index']
+
+                            if isinstance(index, str) and '-' in index:
+                                index_parts = index.split('-')
+                                index_parts[0] = str(tab_index)  
+                                element_id['index'] = '-'.join(index_parts)  
+                            elif isinstance(index, int):
+                                element_id['index'] = tab_index
+                                print('Element ID: ', element_id)
+                                print('Tab Index: ', tab_index)
+
+                  
+                self.tab_content_cache[new_query_key] = tab_content
+                print('Tab Content: ', tab_content)
+
+                return tab_content
+
+              
+            for new_index, tab in enumerate(updated_tabs):
+                  
+                tab['key'] = f'tab-{new_index}'    
+                tab['label'] = f'Query {new_index + 1}'    
+
+                  
+                old_query_key = f"Query{new_index + 1 + (1 if new_index >= index_to_remove else 0)}"    
+                new_query_key = f"Query{new_index + 1}"    
+
+                  
+                if old_query_key in self.conditions:
+                    new_conditions[new_query_key] = self.conditions[old_query_key]
+
+                  
+                if old_query_key in self.tab_content_cache:
+                    tab_content = update_tab_content(old_query_key, new_query_key, new_index)
+                    updated_content[new_query_key] = tab_content
+
+              
+            self.conditions = new_conditions
+            self.tab_content_cache = updated_content    
+
+              
             if latestDeletePane == activeKey:
                 new_active_key = updated_tabs[0]['key'] if updated_tabs else None
             else:
                 new_active_key = dash.no_update
 
             return updated_tabs, new_active_key
+
+            
+
+
+
+
 
 
 
@@ -720,12 +840,31 @@ class Vel:
             prevent_initial_call=True
         )
         def display_label_input(nClicks, index):
+            '''
+            This function displays the label input field when the 'Add Label' button is clicked.
+            '''
+
             if nClicks > 0:
-                return fac.AntdInput(
-                    id={'type': 'label-input', 'index': index},
-                    size='small',
-                    style={'width': '200px'}
-                ), {'display': 'none'}
+                return fac.AntdTooltip(
+                        fac.AntdInput(
+                        id={'type': 'label-input', 'index': index},
+                        size='small',
+                        style={'width': '200px'}
+                        ),
+                        id = "tooltip-label",
+                        title="Press ENTER to add the label",
+                        placement="top",  
+                        trigger="hover",
+                        overlayStyle={
+                        'padding': '2px',  
+                        'fontSize': '15px',  
+                        'color': '#2c3e50',  
+                        'borderRadius': '10px',  
+                        'boxShadow': '0px 6px 10px rgba(0, 0, 0, 0.12)',  
+                        'textShadow': '0.5px 0.5px 2px rgba(0, 0, 0, 0.05)'  
+                        },
+                        ),{'display': 'none'}
+
             return dash.no_update, dash.no_update
 
 
@@ -740,6 +879,10 @@ class Vel:
             prevent_initial_call=True
         )
         def add_label(nSubmit, label_value, existing_labels, query_index):
+            '''
+            This function adds a label to the query.
+            '''
+
             if label_value:
                 label_id = len(existing_labels)  
                 dcc.Store(id={'type': 'closecount-store', 'index': f"{query_index}-{label_id}"}, data=[]),
@@ -756,6 +899,7 @@ class Vel:
             
             return dash.no_update, dash.no_update, dash.no_update
         
+        
 
         @app.callback(
             Output({'type': 'label-container', 'index': ALL}, 'children', allow_duplicate=True),
@@ -764,6 +908,9 @@ class Vel:
             prevent_initial_call=True
         )
         def delete_label(closeCounts, existing_labels):
+            '''
+            This function deletes a label from the query.
+            '''
            
             ctx = dash.callback_context
             triggered_id = ctx.triggered_id
@@ -785,15 +932,13 @@ class Vel:
                 for i, child in enumerate(container_children):
                     
                     if 'id' in child['props'] and child['props']['id'] == triggered_id:
-                        print(f"Deleting label: {child['props']['content']} with ID: {child['props']['id']}")
+                         
                         container_children.pop(i)  
                         break  
 
                 updated_label_lists.append(container_children)
 
             return updated_label_lists
-
-
 
 
         @app.callback(
@@ -803,51 +948,67 @@ class Vel:
             prevent_initial_call=True
         )
         def display_summary(nClicks):
+            '''
+            This function displays the query summary information.
+            '''
+
             summary_data = VelPredicate.get_summary(self.log_view)
 
             evaluations = summary_data['evaluations']
             queries = summary_data['queries']
+            print("Evaluations: ", evaluations)
+            print("Queries: ", queries)
 
-            timeline_items = [
-            {
+            timeline_items = []
+
+            for index, row in evaluations.iterrows():
+                query_value = row['query']
+
+                  
+                if index < len(queries):
+                    predicate_value = queries.loc[index, 'predicates']
+                else:
+                    predicate_value = "No predicates found for this index."
+
+                  
+                timeline_item = {
                     'content': fac.AntdCard(
-                        title=f"Query: {row['query']}",
+                        title=f"Query: {query_value if query_value else 'Unnamed Query'}",
                         children=[
                             dbc.Row([
-                                dbc.Col("Source Log: ", style={'fontWeight': 'bold', 'display': 'inline'}, width='auto'),
+                                dbc.Col("Source Log: ", style={'fontWeight': 'bold', 'display': 'inline'}, width=4, align='start'),
                                 dbc.Col(row['source_log'], style={'display': 'inline'}, width='auto')
-                            ], style={'marginBottom': '6px'}),
+                            ], style={'marginBottom': '6px', 'width': '100%'}),
                             dbc.Row([
-                                dbc.Col("Result Set: ", style={'fontWeight': 'bold', 'display': 'inline'}, width='auto'),
+                                dbc.Col("Result Set: ", style={'fontWeight': 'bold', 'display': 'inline'}, width=4, align='start'),
                                 dbc.Col(row['result_set'], style={'display': 'inline'}, width='auto')
-                            ], style={'marginBottom': '6px'}),
+                            ], style={'marginBottom': '6px', 'width': '100%'}),
                             dbc.Row([
-                                dbc.Col("Labels: ", style={'fontWeight': 'bold', 'display': 'inline'}, width='auto'),
-                                dbc.Col(row['labels'], style={'display': 'inline'}, width='auto')
-                            ], style={'marginBottom': '6px'}),
+                                dbc.Col("Labels: ", style={'fontWeight': 'bold', 'display': 'inline'}, width=4, align='start'),
+                                dbc.Col(", ".join([lbl for sublist in row['labels'] for lbl in sublist]), style={'display': 'inline'}, width='auto')
+                            ], style={'marginBottom': '6px', 'width': '100%'}),
                             dbc.Row([
-                                dbc.Col("Predicates: ", style={'fontWeight': 'bold', 'display': 'inline'}, width='auto'),
-                                dbc.Col(queries.loc[queries['query'] == row['query'], 'predicates'].values[0], style={'display': 'inline'}, width='auto')
-                            ], style={'marginBottom': '6px'}),
+                                dbc.Col("Predicates: ", style={'fontWeight': 'bold', 'width': 'fit-content'}, width=3, align='start'),
+                                dbc.Col(predicate_value, style={'padding':'0px', 'width':'14vw'}, width=9, align='start')
+                            ], style={'marginBottom': '6px', 'width': '100%'})
                         ],
                         bordered=True,
                         style={
                             'marginBottom': '10px',
                             'boxShadow': '0 2px 8px rgba(0, 0, 0, 0.15)',
                             'borderRadius': '8px',
-                            'backgroundColor': '#fafafa'  # Slightly different background color for the card body
+                            'backgroundColor': '#fafafa'
                         },
                         bodyStyle={'padding': '10px'},
                         hoverable=True,
-                        headStyle={'backgroundColor': '#f0f2f5'}  # Slightly different color for the card header
+                        headStyle={'backgroundColor': '#f0f2f5'}
                     ),
                     'color': 'blue',
                 }
-                for index, row in evaluations.iterrows()
-            ]
 
+                timeline_items.append(timeline_item)
 
-            # Build the AntdTimeline component
+              
             timeline_content = fac.AntdSpace(
                 [
                     fac.AntdTimeline(
@@ -864,7 +1025,6 @@ class Vel:
             return True, timeline_content
 
 
-
         @app.callback(
             Output({'type': 'condition-container', 'index': MATCH}, 'children', allow_duplicate=True),
             Output({'type': 'condition-store', 'index': MATCH}, 'data', allow_duplicate=True),
@@ -875,6 +1035,9 @@ class Vel:
             prevent_initial_call=True
         )
         def add_condition(add_clicks, condition_count, existing_conditions, index):
+            '''
+            This function adds a condition to the query.
+            '''
 
             triggered_id = dash.callback_context.triggered[0]['prop_id'].split('.')[0]
 
@@ -889,9 +1052,6 @@ class Vel:
             existing_conditions.append(
                 html.Div(
                     [
-                        # Divider
-                        # html.Hr(style={'borderTop': '2px solid #dae9f6', 'marginBottom': '20px'}),
-
                         dbc.Row([
                                 dbc.Col(
                                     fac.AntdDivider(
@@ -908,20 +1068,21 @@ class Vel:
 
                                     width=12, align="center"
                                 )
-                            ], style={'marginBottom': '30px'}),
+                            ], 
+                            ),
 
                         # Query Condition Inputs
                         dbc.Row([
-                            dbc.Col(fac.AntdText(f'Condition {condition_count + 1}:', className="font-weight-bold"), width=1, align="center"),
+                            dbc.Col(fac.AntdText(f'Condition {condition_count + 1}:', className="font-weight-bold"), width=2, align="center", style={'width': '9vw'}),
                             dbc.Col(
                                 fac.AntdRadioGroup(
                                     options=radio_options,
-                                    id={'type': 'radios', 'index': f'{index}-{0}'},
+                                    id={'type': 'radios', 'index': f'{index}-{condition_count}'},
                                     optionType='button',
-                                    buttonStyle='solid',
-                                    style={'flexWrap': 'wrap',}
+                                    buttonStyle='outline',
+                                    className="equal-width-buttons custom-disabled-radio",
                                 ),className='radio-group-container',
-                                width=8, align='start' ,style={'paddingLeft': '0vw'}
+                                width=10, align='start' ,style={'paddingLeft': '0vw', 'width': '55vw'}
                             ),
                            dbc.Col(
                                fac.AntdTooltip(
@@ -933,7 +1094,6 @@ class Vel:
                                 ),
                                 id = "tooltip-label",
                                 title="Delete Condition",
-                                # color="#ffffff",  # Pure white background with a gradient
                                     placement="top",  
                                     trigger="hover",
                                     overlayStyle={
@@ -942,20 +1102,10 @@ class Vel:
                                         'color': '#2c3e50',  
                                         'borderRadius': '10px',  
                                         'boxShadow': '0px 6px 10px rgba(0, 0, 0, 0.12)',  
-                                        # 'backgroundImage': 'linear-gradient(135deg, #f8f9fa 10%, #ffffff 100%)',  
                                         'textShadow': '0.5px 0.5px 2px rgba(0, 0, 0, 0.05)'  
                                     },
                             ),width="auto", align="start")
-                                # dbc.Button(
-                                #     [
-                                #         html.I(className="antd-delete-two-tone", style={"marginRight": "8px"}), 
-                                #     ],
-                                #     id={'type': 'remove-condition-button', 'index': f'{index}-{condition_count}'}, 
-                                #     color='secondary',
-                                #     n_clicks=0,
-                                #     className='custom-trash-button'
-                                #     ),
-                                    
+
                             ], className="mb-4 mt-4"),
                         
                         # Additional Inputs for Each Condition
@@ -979,6 +1129,9 @@ class Vel:
             prevent_initial_call=True
         )
         def remove_condition(n_clicks, all_conditions, condition_count):
+            '''
+            This function removes a condition from the query.
+            '''
 
             ctx = dash.callback_context
             if not ctx.triggered:
@@ -1012,101 +1165,17 @@ class Vel:
             return updated_conditions, condition_count
 
 
-        # @app.callback(
-        #     Output('tabs', 'children'),
-        #     Output('tabs', 'defaultActiveKey'),
-        #     Input('add-query-button', 'nClicks'),
-        #     State('tabs', 'children'),
-        #     prevent_initial_call=True
-        # )
-        # def add_query_tab(nClicks, current_tabs):
-        #     ctx = dash.callback_context
-
-        #     # Avoid unnecessary processing if no clicks happened
-        #     if not ctx.triggered or nClicks is None:
-        #         raise dash.exceptions.PreventUpdate
-     
-        #     new_index = len(current_tabs)
-
-        #     new_tab = self.generate_query_tab(new_index)
-
-        #     current_tabs.append(new_tab)
-
-        #     return current_tabs, f'tab-{new_index}'
-
-        # @app.callback(
-        #     Output('qname_index', 'data'),
-        #     Input('tabs', 'activeKey'),
-        #     prevent_initial_call=True
-        # )
-        # def update_query_index(active_tab_key):
-        #     active_index = int(active_tab_key.split('-')[-1])
-        #     return active_index
-        
-
-
-
         @app.callback(
-            Output({'type': 'predicate-info', 'index': MATCH}, "children"),
-            Input({'type': 'radios', 'index': MATCH}, "value")
-        )
-        def update_predicate_info(value):
-            if value is not None:
-                descriptions = {
-                    'EqToConstant': "Keeps cases that contain at least an event with the given attribute equal to a constant value.",
-                    'NotEqToConstant': "Keeps cases that do not contain any event with the given attribute equal to a constant value.",
-                    'GreaterEqualToConstant': "Keeps cases that contain at least an event with the given attribute greater than or equal to a constant value.",
-                    'LessEqualToConstant': "Keeps cases that contain at least an event with the given attribute lower than or equal to a constant value.",
-                    'GreaterThanConstant': "Keeps cases that contain at least an event with the given attribute greater than a constant value.",
-                    'LessThanConstant': "Keeps cases that contain at least an event with the given attribute lower than a constant value.",
-                    'StartWith': "Keeps cases starting with the specified activities.",
-                    'EndWith': "Keeps cases ending with a given activity.",
-                    'DurationWithin': "Keeps cases with durations within a specified range in seconds.",
-                    'SumAggregate': "Sums the values of the specified attribute for the specified group of columns.",
-                    'MaxAggregate': "Finds the maximum value of the specified attribute for the specified group of columns.",
-                    'MinAggregate': "Finds the minimum value of the specified attribute for the specified group of columns."
-                }
-                
-                icon_map = {
-                    'EqToConstant': 'antd-carry-out',
-                    'NotEqToConstant': 'antd-not-equal',
-                    'GreaterEqualToConstant': 'antd-greater-than-equal',
-                    'LessEqualToConstant': 'antd-less-than-equal',
-                    'GreaterThanConstant': 'antd-greater-than',
-                    'LessThanConstant': 'antd-less-than',
-                    'StartWith': 'antd-play',
-                    'EndWith': 'antd-stop',
-                    'DurationWithin': 'antd-clock',
-                    'SumAggregate': 'antd-sum',
-                    'MaxAggregate': 'antd-arrow-up',
-                    'MinAggregate': 'antd-arrow-down'
-                }
-
-                description = descriptions.get(value, "No description available.")
-                icon_class = icon_map.get(value, 'antd-info-circle')
-
-                return html.Div([
-                    fac.AntdIcon(
-                                id='icon',
-                                icon='antd-info-circle-two-tone',
-                                style={'marginRight': '10px'}
-                            ),
-
-                    description
-                ], style={'color': 'black', 'fontSize': '15px', 'display': 'flex', 'alignItems': 'center', 'paddingBottom': '20px','fontWeight':'500'}, className="font-weight-bold")
-            return html.Div()
-
-        @app.callback(
-            Output({'type': 'Query_input', 'index': MATCH}, "children"),  # This uses MATCH
+            Output({'type': 'Query_input', 'index': MATCH}, "children"),  
             Input({'type': 'radios', 'index': MATCH}, "value"),
             Input({'type': 'radios', 'index': MATCH}, "id"),
             State("qname_index", 'data'),
             prevent_initial_call=True
         )
-
-
         def update_output(value, condition_id, query_index):
-            
+            '''
+            This function updates the input fields based on the selected predicate.
+            '''
 
             if value is not None:
 
@@ -1129,7 +1198,7 @@ class Vel:
 
                     return html.Div([
                         dbc.Row([
-                                dbc.Col(fac.AntdText('Attribute Key:', className="font-weight-bold"), width=1, align="center"),
+                                dbc.Col(fac.AntdText('Attribute Key:', className="font-weight-bold"), width=2, align="center", style={'width': '9vw'}),
                                 dbc.Col(fac.AntdSelect(
                                     id={'type': 'attribute_key_dropdown', 'index': f'{query_index}-{cond_index}'},
                                     options=[{'label': col, 'value': col} for col in self.df.columns],
@@ -1140,7 +1209,7 @@ class Vel:
                                     id={'type': 'value_options_container1', 'index': f'{query_index}-{cond_index}'}, width=1, align="center"),
                                 dbc.Col(
                                     id={'type': 'value_options_container2', 'index': f'{query_index}-{cond_index}'}, width=1)           
-                            ], className="mb-4 mt-4", align="center"),
+                            ], className="mb-1 mt-4", align="center"),
                     ])
 
 
@@ -1149,24 +1218,18 @@ class Vel:
                     
                     return html.Div([
                         dbc.Row([
-                                    dbc.Col(fac.AntdText('Attribute Key:', className="font-weight-bold"), width=1, align="center"),
+                                    dbc.Col(fac.AntdText('Attribute Key:', className="font-weight-bold"), width=2, align="center", style={'width': '9vw'}),
                                     dbc.Col(fac.AntdSelect(
                                         id={'type': 'attribute_key_dropdown', 'index': f'{query_index}-{cond_index}'},                             
                                         options=[{'label': col, 'value': col} for col in self.df.columns],
                                         style={'width': '11vw', 'paddingLeft': '0vw'}
                                     ), width=1),
                                     dbc.Col(width=1,style={'width': '10vw'}),
-                                    dbc.Col(fac.AntdText('Value:', className="font-weight-bold"), width=1, align="center"),
+                                    dbc.Col(fac.AntdText('Value:', className="font-weight-bold"), width=1, align="center", style={'width': '9vw'}),
                                     dbc.Col(fac.AntdInput(
                                                         id={'type': 'value_input', 'index': f'{query_index}-{cond_index}'},
                                                         placeholder='Enter a value', size='middle', style={'width': '11vw'}), width=1)
-                                ], className="mb-4 mt-4"),
-                        # dbc.Row([
-                        #             dbc.Col(fac.AntdText('Value:', type='secondary'), width="auto", align="center"),
-                        #             dbc.Col(fac.AntdInput(
-                        #                                 id={'type': 'value_input', 'index': f'{query_index}-{cond_index}'},
-                        #                                 placeholder='Enter a value', size='middle', style={'width': '100%'}), width=2)
-                        #         ], className="mb-4 mt-4"),
+                                ], className="mb-1 mt-4"),
                         dcc.Store(id={'type':'value1', 'index': f'{query_index}-{cond_index}'})
                     ])
 
@@ -1174,26 +1237,34 @@ class Vel:
 
                     unique_values = self.df['Activity'].unique()
 
+                    tooltip_text = "Selecting multiple values will apply a logical OR operation. Any of the selected values will satisfy the condition."
+
+
                     return html.Div([
                         dbc.Row([
-                                dbc.Col(fac.AntdText('Values:', className="font-weight-bold"), width="auto", align="center"),
-                                dbc.Col(fac.AntdSelect(
-                                    id={'type':'values_dropdown', 'index': f'{query_index}-{cond_index}'}, 
-                                    options=[{'label': value, 'value': value} for value in unique_values],
-                                    mode='tags',
-                                    style={'width': '11vw', 'paddingLeft': '0vw'}
-                                ), width=1)
-                            ], className="mb-4 mt-4"),
-                        # dcc.Store(id={'type':'value2', 'index': f'{query_index}-{cond_index}'})
+                                dbc.Col(fac.AntdText('Values:', className="font-weight-bold"), width=2, align="center", style={'width': '9vw'}),
+                                dbc.Col(
+                                        fac.AntdTooltip(
+                                            title=tooltip_text,
+                                            placement="right",
+                                            children=fac.AntdSelect(
+                                                id={'type':'values_dropdown', 'index': f'{query_index}-{cond_index}'},
+                                                options=[{'label': value, 'value': value} for value in unique_values],
+                                                mode='tags',
+                                                style={'width': '11vw', 'paddingLeft': '0vw'}
+                                            )
+                                        ),
+                                        width=1
+                                    ),
+                            ], className="mb-1 mt-4"),
                     ])
 
                 else:
                     if 'group_by' in arg_names:
                         return html.Div([
                             dbc.Row([
-                                dbc.Col(fac.AntdText('Aggregate Column:', className="font-weight-bold"), width="auto", align="center"),
+                                dbc.Col(fac.AntdText('Aggregate Column:', className="font-weight-bold"), width=2, align="center", style={'width': '9vw'}),
                                 dbc.Col(fac.AntdSelect(
-                                    # id='attribute_key_dropdown_groupby',
                                     id={'type': 'attribute_key_dropdown_groupby', 'index': f'{query_index}-{cond_index}'}, 
                                     options=[{'label': col, 'value': col} for col in self.log.columns],
                                     style={'width': '11vw', 'paddingLeft': '0vw'}
@@ -1241,20 +1312,6 @@ class Vel:
                             ), width=1)
                         ], className="mb-4 mt-4"),
 
-                        # dbc.Row([
-                        #     dbc.Col(fac.AntdText('Min Duration(seconds):', type='secondary'), width="auto", align="center"),
-                        #     dbc.Col(fac.AntdInputNumber(
-                        #         id={'type': 'min_duration', 'index': f'{query_index}-{cond_index}'},
-                        #         placeholder='Enter min duration', 
-                        #         style={'width': '100%'}
-                        #     ), width=2),
-                        #     dbc.Col(fac.AntdText('Max Duration(seconds):', type='secondary'), width="auto", align="center"),    
-                        #     dbc.Col(fac.AntdInputNumber(
-                        #         id={'type': 'max_duration', 'index': f'{query_index}-{cond_index}'},
-                        #         placeholder='Enter max duration', 
-                        #         style={'width': '100%'}
-                        #     ), width=2)
-                        # ], className="mb-4 mt-4"),
 
                         dbc.Row([
                             dbc.Col(fac.AntdSlider(
@@ -1270,6 +1327,7 @@ class Vel:
                         dcc.Store(id={'type':'value3', 'index': f'{query_index}-{cond_index}'})
                     ])
 
+
         @app.callback(
             Output({'type': 'qname-store', 'index': MATCH}, 'data'),
             Input({'type': 'query_name', 'index': MATCH}, 'value'),
@@ -1277,6 +1335,9 @@ class Vel:
         )
 
         def store_qname(qname, query_index):
+            '''
+            This function is responsible for storing the query name.
+            '''
 
             query_index = query_index['index']
 
@@ -1289,6 +1350,7 @@ class Vel:
             Output({'type': 'Query_display', 'index': ALL}, 'children'),
             [
                 Input({'type': 'attribute_key_dropdown', 'index': ALL}, 'value'),
+                Input({'type': 'attribute_key_dropdown_groupby', 'index': ALL}, 'value'),
                 Input({'type': 'value_input', 'index': ALL}, 'value'),
                 Input({'type': 'values_dropdown', 'index': ALL}, 'value'),
                 Input({'type': 'radios', 'index': ALL}, 'value'),
@@ -1298,8 +1360,9 @@ class Vel:
                 Input({'type': 'groupby_options', 'index': ALL}, 'value'),
                 Input({'type': 'value_equality', 'index': ALL}, 'value'),
             ],
-            [
+            [   
                 State({'type': 'attribute_key_dropdown', 'index': ALL}, 'id'),
+                Input({'type': 'attribute_key_dropdown_groupby', 'index': ALL}, 'id'),
                 State({'type': 'value_input', 'index': ALL}, 'id'),
                 State({'type': 'values_dropdown', 'index': ALL}, 'id'),
                 State({'type': 'radios', 'index': ALL}, 'id'),
@@ -1311,9 +1374,12 @@ class Vel:
                 State("qname_index", "data")
             ]
         )
-        def update_query_display(attr_keys, value_inputs, values_list, predicates, time_units, min_durations, max_durations, group_by_values, value_equalities,
-                                attr_key_ids, value_input_ids, values_dropdown_ids, predicate_ids, time_unit_ids, min_duration_ids, max_duration_ids, group_by_ids, value_equality_ids,
+        def update_query_display(attr_keys, attr_keys_groupby , value_inputs, values_list, predicates, time_units, min_durations, max_durations, group_by_values, value_equalities,
+                                attr_key_ids, attr_keys_groupby_ids, value_input_ids, values_dropdown_ids, predicate_ids, time_unit_ids, min_duration_ids, max_duration_ids, group_by_ids, value_equality_ids,
                                 query_index):
+            '''
+            This function is responsible for updating the query display based on the user's input.
+            '''
 
             def filter_relevant_inputs(inputs, ids):
                 return [
@@ -1321,7 +1387,9 @@ class Vel:
                     if comp_id['index'].split('-')[0] == str(query_index)
                 ]
 
+            # Ensure you are filtering based on the updated query_index after the tab deletion
             relevant_attr_keys = filter_relevant_inputs(attr_keys, attr_key_ids)
+            relevant_attr_keys_groupby = filter_relevant_inputs(attr_keys_groupby, attr_keys_groupby_ids)
             relevant_value_inputs = filter_relevant_inputs(value_inputs, value_input_ids)
             relevant_values_list = filter_relevant_inputs(values_list, values_dropdown_ids)
             relevant_predicates = filter_relevant_inputs(predicates, predicate_ids)
@@ -1330,6 +1398,9 @@ class Vel:
             relevant_max_durations = filter_relevant_inputs(max_durations, max_duration_ids)
             relevant_group_by_values = filter_relevant_inputs(group_by_values, group_by_ids)
             relevant_value_equalities = filter_relevant_inputs(value_equalities, value_equality_ids)
+
+            # Rest of your query display logic remains the same
+
 
 
             query_key = f'Query{query_index + 1}'
@@ -1352,19 +1423,19 @@ class Vel:
                     condition_strs.append(f"DurationWithin({min_duration}, {max_duration})")
 
                 elif predicate in ['SumAggregate', 'MaxAggregate', 'MinAggregate']:
-                    attribute_key = next((val for val, val_id in relevant_attr_keys if val_id['index'].split('-')[1] == str(cond_index)), None)
+                    attribute_key = next((val for val, val_id in relevant_attr_keys_groupby if val_id['index'].split('-')[1] == str(cond_index)), None)
                     group_by = next((val for val, val_id in relevant_group_by_values if val_id['index'].split('-')[1] == str(cond_index)), None)
                     condition_strs.append(f"{predicate}('{attribute_key}', group_by={group_by})")
 
-                elif predicate in ['EqToConstant', 'NotEqToConstant']:
+                elif predicate in ['EqToConstant =', 'NotEqToConstant ≠']:
                     attribute_key = next((val for val, val_id in relevant_attr_keys if val_id['index'].split('-')[1] == str(cond_index)), None)
                     value = next((val for val, val_id in relevant_value_equalities if val_id['index'].split('-')[1] == str(cond_index)), None)
-                    condition_strs.append(f"{predicate}('{attribute_key}', '{value}')")
+                    condition_strs.append(f"{predicate.split()[0]}('{attribute_key}', '{value}')")
 
-                elif predicate in ['GreaterEqualToConstant', 'LessEqualToConstant', 'GreaterThanConstant', 'LessThanConstant']:
+                elif predicate in ['GreaterEqualToConstant ≥', 'LessEqualToConstant ≤', 'GreaterThanConstant >', 'LessThanConstant <']:
                     attribute_key = next((val for val, val_id in relevant_attr_keys if val_id['index'].split('-')[1] == str(cond_index)), None)
                     value = next((val for val, val_id in relevant_value_inputs if val_id['index'].split('-')[1] == str(cond_index)), None)
-                    condition_strs.append(f"{predicate}('{attribute_key}', '{value}')")
+                    condition_strs.append(f"{predicate.split()[0]}('{attribute_key}', '{value}')")
 
             if len(condition_strs) == 1:
                 query_str += condition_strs[0]
@@ -1413,41 +1484,57 @@ class Vel:
             prevent_initial_call=True
         )
         def sync_duration_inputs(min_duration, max_duration, slider_range, time_unit):
+            '''
+            This callback synchronizes the duration inputs and the slider range.
+            '''
+
             ctx = dash.callback_context
 
             if not ctx.triggered:
                 raise dash.exceptions.PreventUpdate
 
-            
+            # Conversion based on time units
             if time_unit == 'Minutes':
-                max_duration_seconds= 60*60  
-                step = 60  
+                max_duration_seconds = 60 * 60  # 1 hour max
+                step = 60  # 1 minute
             elif time_unit == 'Hours':
-                max_duration_seconds= 24*3600  
+                max_duration_seconds = 24 * 3600  
                 step = 3600  
             elif time_unit == 'Days':
-                max_duration_seconds= 30*86400
+                max_duration_seconds = 30 * 86400  
                 step = 86400  
+            elif time_unit == 'Months':
+                max_duration_seconds = 12 * 2592000  
+                step = 2592000  
+            elif time_unit == 'Years':
+                max_duration_seconds = 24 * 31536000  
+                step = 31536000  
             else:
-                max_duration_seconds= 24*3600  
+                max_duration_seconds = 24 * 3600  
                 step = 3600
 
+            # Update the slider range based on the context
             if 'duration_range_slider' in ctx.triggered[0]['prop_id']:
                 min_duration_converted = slider_range[0]
                 max_duration_converted = slider_range[1]
-                return min_duration_converted, max_duration_converted, slider_range, 0, max_duration_seconds, {i: f'{i//step}{time_unit[0].lower()}' for i in range(0, max_duration_seconds + 1, step)}
+                 
+
+                return min_duration_converted, max_duration_converted, slider_range, 0, max_duration_seconds, {i: f'{i // step}{time_unit[0].lower()}' for i in range(0, max_duration_seconds + 1, step)}
 
             elif 'min_duration' in ctx.triggered[0]['prop_id']:
                 if max_duration is None or min_duration > max_duration:
                     max_duration = min_duration
-                return min_duration, max_duration, [min_duration, max_duration], 0, max_duration_seconds, {i: f'{i//step}{time_unit[0].lower()}' for i in range(0, max_duration_seconds + 1, step)}
+                return min_duration, max_duration, [min_duration, max_duration], 0, max_duration_seconds, {i: f'{i // step}{time_unit[0].lower()}' for i in range(0, max_duration_seconds + 1, step)}
 
             elif 'max_duration' in ctx.triggered[0]['prop_id']:
                 if min_duration is None or max_duration < min_duration:
                     min_duration = max_duration
-                return min_duration, max_duration, [min_duration, max_duration], 0, max_duration_seconds, {i: f'{i//step}{time_unit[0].lower()}' for i in range(0, max_duration_seconds + 1, step)}
+                return min_duration, max_duration, [min_duration, max_duration], 0, max_duration_seconds, {i: f'{i // step}{time_unit[0].lower()}' for i in range(0, max_duration_seconds + 1, step)}
 
-            return 0, max_duration_seconds, [0, max_duration_seconds], 0, max_duration_seconds, {i: f'{i//step}{time_unit[0].lower()}' for i in range(0, max_duration_seconds + 1, step)}
+             
+
+            return 0, max_duration_seconds, [0, max_duration_seconds], 0, max_duration_seconds, {i: f'{i // step}{time_unit[0].lower()}' for i in range(0, max_duration_seconds + 1, step)}
+
 
         @app.callback(
             Output({'type': 'value3', 'index': MATCH}, "data"),
@@ -1460,29 +1547,20 @@ class Vel:
             ]
         )
         def update_duration_output(min_duration, max_duration, unit, cond_id, query_index):
+            '''
+            This callback updates the min and max duration values for the DurationWithin Predicate.
+            '''
         
             if min_duration is None or max_duration is None:
                 print("One of the durations is None, returning empty.")
                 return []
 
-            # Convert selected duration to seconds based on the selected unit
-            time_unit_multiplier = {
-                'Years': 31536000,
-                'Months': 2592000,
-                'Days': 86400,
-                'Hours': 3600,
-                'Minutes': 60
-            }[unit]
-
-            min_duration_sec = min_duration * time_unit_multiplier
-            max_duration_sec = max_duration * time_unit_multiplier
-
 
             cond_index_parts = cond_id['index'].split('-')
             cond_index = int(cond_index_parts[-1])
 
-            self.update_condition(query_index, cond_index, 'min_duration_seconds', min_duration_sec)
-            self.update_condition(query_index, cond_index, 'max_duration_seconds', max_duration_sec)
+            self.update_condition(query_index, cond_index, 'min_duration_seconds', min_duration)
+            self.update_condition(query_index, cond_index, 'max_duration_seconds', max_duration)
 
             return cond_index
 
@@ -1497,6 +1575,10 @@ class Vel:
             prevent_initial_call=True
         )
         def update_groupby_options(selected_key, cond_id, query_index):
+            '''
+            This callback updates the group by options for the selected attribute key for SumAggregate, MaxAggregate, MinAggregate Predicates.
+            '''
+
             if selected_key is None:
                 return dash.no_update
             cond_index_parts = cond_id['index'].split('-')
@@ -1505,17 +1587,17 @@ class Vel:
 
             return html.Div([
                 dbc.Row([
-                    dbc.Col(fac.AntdText('Group By Values:', type='secondary'), width="auto", align="center"),
+                    dbc.Col(fac.AntdText('Group By Values:', className="font-weight-bold"), width=2, align="center", style={'width': '9vw'}),
                     dbc.Col(fac.AntdSelect(
                         id={'type': 'groupby_options', 'index': cond_id['index']},
                         options=[{'label': col, 'value': col} for col in self.log.columns],
                         defaultValue='case:concept:name',
                         mode='tags',
                         style={'width': '11vw', 'paddingLeft': '0vw'}
-                    ), width=1),
-                    dbc.Col(id={'type': 'warning_message', 'index': cond_id['index']}, width=2)
+                    ), width=2),
+                    dbc.Col(id={'type': 'warning_message', 'index': cond_id['index']}, width=3, align="center")
 
-                ], className="mb-4 mt-4")
+                ], className="mb-1 mt-4")
             ])
 
         @app.callback(
@@ -1530,6 +1612,9 @@ class Vel:
             ]
         )
         def update_groupby_output(selected_value, cond_id, query_index):
+            '''
+            This callback updates the group by values for the selected attribute key for SumAggregate, MaxAggregate, MinAggregate Predicates.
+            '''
             warning_message = ''
             if selected_value is None or 'case:concept:name' not in selected_value:
                 warning_message = html.Div([
@@ -1554,7 +1639,9 @@ class Vel:
             prevent_initial_call= True
         )
         def update_values(selected_value, cond_id, query_index):
-            print("In start with values:", selected_value)
+            '''
+            This callback updates the value for the selected values StartWith and EndWith Predicates.
+            '''
             if selected_value is None:
                 return []
             
@@ -1562,7 +1649,6 @@ class Vel:
             cond_index = int(cond_index_parts[-1])
             self.update_condition(query_index, cond_index, 'attribute_key' , None)
             self.update_condition(query_index, cond_index, 'values' , selected_value)
-            print("In start with values updated:", self.conditions)
             return selected_value   
 
             
@@ -1576,7 +1662,10 @@ class Vel:
             prevent_initial_call=True
         )
         def update_values(selected_key, selected_value, cond_id, query_index):
-            
+            '''
+            This callback updates the value for the selected attribute key for GTC, LTC, GTEC, LTEC Predicates.
+            '''
+
             if selected_value is None:
                 return []
             
@@ -1584,7 +1673,6 @@ class Vel:
 
                 cond_index_parts = cond_id['index'].split('-')
                 cond_index = int(cond_index_parts[-1])
-                print("converting value:", selected_value)
                 converted_value = float(selected_value)
 
             except ValueError:
@@ -1595,9 +1683,9 @@ class Vel:
             self.update_condition(query_index, cond_index, 'values' , converted_value)
 
             return converted_value
+        
 
         # @callback to run the predicate for values ETC, NETC
-
         @app.callback(
             Output({'type': 'value_options_container1', 'index': MATCH}, "children"),
             Output({'type': 'value_options_container2', 'index': MATCH}, "children"),
@@ -1607,6 +1695,10 @@ class Vel:
             prevent_initial_call=True
         )
         def update_value_options(selected_key, cond_id, query_index):
+            '''
+            This callback updates the value options of the value field for the selected attribute key for EQ and NotEQ Predicates.
+            '''
+
             cond_index_parts = cond_id['index'].split('-')
             cond_index = int(cond_index_parts[-1])
 
@@ -1617,32 +1709,23 @@ class Vel:
         
             unique_values = self.df[selected_key].unique()
 
-            return fac.AntdText('Values:', className="font-weight-bold"),fac.AntdSelect(
-                        id={'type': 'value_equality', 'index': f'{query_index}-{cond_index}'},
-                        options=[{'label': value, 'value': value} for value in unique_values if not pd.isna(value)],
-                        mode='tags',
-                        style={'width': '11vw', 'paddingLeft': '0vw'})
-            
+            tooltip_text = (
+                "Selecting multiple values will apply a logical OR operation. "
+                "This means any of the selected values will satisfy the condition."
+            )
 
-        # @app.callback(
-        #     Output({'type': 'value_equality', 'index': MATCH}, "options"),
-        #     Input({'type': 'attribute_key_dropdown', 'index': MATCH}, "value"),
-        #     Input({'type': 'attribute_key_dropdown', 'index': MATCH}, "id"),
-        #     State("qname_index", 'data'),
-        #     prevent_initial_call=True
-        # )
-        # def update_value_options(selected_key, cond_id, query_index):
-        #     cond_index_parts = cond_id['index'].split('-')
-        #     cond_index = int(cond_index_parts[-1])
 
-        #     if selected_key is None:
-        #         return dash.no_update
+            return fac.AntdText('Values:', className="font-weight-bold", style={'width':'9vw'}),fac.AntdTooltip(
+                        title=tooltip_text,
+                        placement="right",
+                        children=fac.AntdSelect(
+                            id={'type': 'value_equality', 'index': f'{query_index}-{cond_index}'},
+                            options=[{'label': value, 'value': value} for value in unique_values if not pd.isna(value)],
+                            mode='tags',
+                            style={'width': '11vw', 'paddingLeft': '0vw'}
+                        )
+                )
 
-        #     self.update_condition(query_index, cond_index, 'attribute_key', selected_key)
-        
-        #     unique_values = self.df[selected_key].unique()
-
-        #     return [{'label': value, 'value': value} for value in unique_values if not pd.isna(value)]
         
         @app.callback(
             Output({'type': 'value_equality', 'index': MATCH}, "value"),
@@ -1652,6 +1735,9 @@ class Vel:
             prevent_initial_call=True
         )
         def update_value_multi(selected_value, cond_id, query_index):
+            '''
+            This callback updates the value for the selected values for EQ and NotEQ Predicates.
+            '''
             cond_index_parts = cond_id['index'].split('-')
             cond_index = int(cond_index_parts[-1])
 
@@ -1668,7 +1754,10 @@ class Vel:
             State("qname_index", "data"),
         )
         def update_log_selector(selected_log, query_index):
-            print("Selected log:", selected_log)
+            '''
+            This callback updates the log selector with the selected log.
+            '''
+
             self.conditions[f'Query{query_index + 1}']['source_log'] = selected_log
             return selected_log
 
@@ -1678,130 +1767,238 @@ class Vel:
             State("qname_index", "data"),
         )
         def update_label_container(labels, query_index):
-            print("Labels:", labels)
+            '''
+            This callback updates the label container with the selected labels.
+            '''
 
             tag_values = [child['props']['content'] for child in labels]
 
-            print("Tag values:", tag_values)
             self.conditions[f'Query{query_index + 1}']['label'] = tag_values
 
             return tag_values
 
-        
-        # Callback to run the query and store the result
+        # Function to cache the full query result in Redis (done in the background)
+        def cache_query_result(key, result):
+            '''
+            This function caches the query result in Redis.
+            '''
+            try:
+                result_json = result.to_json(orient="split")
+                redis_cache.set(key, result_json)
+ 
+            except Exception as e:
+                print(f"Error caching result: {e}")
+
+
+        # Function to retrieve the cached result from Redis
+        def get_cached_result(key):
+            '''
+            This function retrieves the cached result from Redis.
+            '''
+
+            try:
+                cached_data = redis_cache.get(key)
+                if cached_data:
+
+                    cached_data = cached_data.decode('utf-8')
+                    
+                    result = pd.read_json(StringIO(cached_data), orient="split")
+                    return result
+                return None
+            except Exception as e:
+                print(f"Error retrieving cached result: {e}")
+                return None
+
+        # Function to capture both UserWarnings and runtime errors
+        def capture_warnings_and_errors():
+            '''
+            This function captures both UserWarnings and runtime errors during query execution.
+            '''
+
+            warning_stream = io.StringIO()
+
+            def custom_warning_handler(message, category, filename, lineno, file=None, line=None):
+                warning_stream.write(f"{category.__name__}: {message}\n")
+
+            warnings.showwarning = custom_warning_handler
+            return warning_stream
+
+
+        # Callback for running the query with UserWarnings and runtime errors captured and displayed
         @app.callback(
-            [Output({'type': 'predicate_output', 'index': MATCH}, "children", allow_duplicate=True),
-            Output({'type': 'query-result', 'index': MATCH}, "data")],
-            Input({"type": "submit", "index": ALL}, "n_clicks"),
+            [
+                Output({'type': 'predicate_output', 'index': MATCH}, "children", allow_duplicate=True),
+                Output({'type': 'warning-popup', 'index': MATCH}, "visible"),
+                Output({'type': 'warning-message', 'index': MATCH}, "children"),
+                Output({'type': 'warning-popup-ui', 'index': MATCH}, "visible"),
+                Output({'type': 'warning-message-ui', 'index': MATCH}, "children"),
+            ],
+            Input({"type": "submit", "index": MATCH}, "n_clicks"),
             State("qname_index", "data"),
+            State({'type': 'query_name', 'index': MATCH}, 'value'),
+            State({'type': 'log_selector', 'index': MATCH}, 'value'),
+
             prevent_initial_call=True
         )
-        def on_button_click(n_clicks, query_index):
-            if n_clicks[0] is None:
+        def on_button_click(n_clicks, query_index, query_name, log_selector):
+            '''
+            This callback runs the query when the "Run Query" button is clicked.
+            '''
+
+            if n_clicks is None:
                 raise dash.exceptions.PreventUpdate
 
-            if n_clicks[0] > 0:
-                # Run the query and get the result
-                result = VelPredicate.run_predicate(self.log_view, self.conditions, f'Query{query_index + 1}')
+            warning_message_ui = ''
+            trigger = False
 
-                # If there's no data, return a message
-                if result is None or result.empty:
-                    return html.Div("No data available for the selected predicate."), dash.no_update
+            # Validation: Check if required fields are missing
+            query_name_missing = query_name is None or query_name.strip() == ""
+            log_selector_missing = log_selector is None
 
-                # Store the full result in a hidden dcc.Store
-                stored_data = result.to_dict('records')
+            if query_name_missing and log_selector_missing:
+                return no_update, True, "Query Name and Log Selector are required!", False, "",
+            elif query_name_missing:
+                return no_update, True, "Query Name is required!", False, "",
+            elif log_selector_missing:
+                return no_update, True, "Log Selector is required!", False, ""
 
-                # Get the shape of the result
-                self.num_cases = len(result['case:concept:name'].unique())
-                self.num_events = len(result)
 
-                # Display shape information
-                shape_info = html.Div([
-                    html.Span(f"Number of Cases: {self.num_cases}", style={'fontWeight': 'bold', 'marginRight': '20px'}),
-                    html.Span(f"Number of Events: {self.num_events}", style={'fontWeight': 'bold'})
-                ], style={'marginBottom': '10px'})
+            if n_clicks > 0:
 
-                # Initialize DataTable with the first 10 rows
-                table = dash_table.DataTable(
-                    columns=[{"name": i, "id": i} for i in result.columns],
-                    data=stored_data[:10],  # Display first 10 rows
-                    page_size=10,
-                    page_action='none',  # Disables internal pagination
-                    style_table={'overflowX': 'auto'},
-                    style_cell={'textAlign': 'left'}
-                )
+                start_time = time.time()
+                query_key = f'Query{query_index + 1}'
 
-                # Load more options
-                load_more_options = html.Div([
-                    dbc.Button("Load Next 10 Rows", id={'type': 'load-next-rows-button', 'index': query_index}, n_clicks=0, style={'marginRight': '10px'}),
-                    dbc.Button("Load Full Table", id={'type': 'load-full-table-button', 'index': query_index}, n_clicks=0, style={'marginRight': '10px'}),
-                ], style={'marginTop': '10px'})
+                # Capture UserWarnings and runtime errors during query execution
+                warning_stream = capture_warnings_and_errors()
 
-                return html.Div([shape_info, table, load_more_options]), stored_data
+                try:
 
-            return html.Div(), dash.no_update
+                    key = query_key+query_name
 
-        # Callback for handling the "Load Next 10 Rows" functionality
+                    result, self.num_cases, self.num_events = VelPredicate.run_predicate(self.log_view, self.conditions, query_key, 10)
+                    if result is None or result.empty:
+                        return html.Div("No data available for the selected filters."), False, "", False, "",
+
+                       
+                    cache_query_result(key, result)
+
+                    table = dash_table.DataTable(
+                        columns=[{"name": i, "id": i} for i in result.columns],
+                        data=result.head(10).to_dict('records'),
+                        page_size=10,
+                        page_action='none',
+                        style_table={'overflowX': 'auto'},
+                        style_cell={'textAlign': 'left'}
+                    )
+
+                    shape_info = html.Div([
+                        html.Span(f"Number of Cases: {self.num_cases}", style={'fontWeight': 'bold', 'marginRight': '20px'}),
+                        html.Span(f"Number of Events: {self.num_events}", style={'fontWeight': 'bold'})
+                    ], style={'marginBottom': '10px'})
+
+                    load_more_options = html.Div([
+                        dbc.Button("Load Next 10 Rows", id={'type': 'load-next-rows-button', 'index': query_index}, n_clicks=0, style={'marginRight': '10px'}),
+                        dbc.Button("Load Full Table", id={'type': 'load-full-table-button', 'index': query_index}, n_clicks=0, style={'marginRight': '10px'}),
+                    ], style={'marginTop': '10px', 'display': 'flex', 'justifyContent': 'flex-end'})
+
+
+                except Exception as e:
+                    # Capture any runtime errors and display them in the warning message
+                    warning_message_ui = f"Error: {str(e)}"
+                    trigger = True
+                    return html.Div(), True, warning_message_ui, True, warning_message_ui
+
+                # Process captured warnings
+                warning_message_ui = warning_stream.getvalue().strip()
+                if warning_message_ui:
+                    trigger, warn = True, warning_message_ui
+                else:
+                    trigger, warn = False, ""
+
+                return html.Div([shape_info, table, load_more_options]), False, "", trigger, warn
+
+            return html.Div(), False, "", False, ""
+
+
+        # Callback for "Load Next 10 Rows" functionality
         @app.callback(
             Output({'type': 'predicate_output', 'index': MATCH}, "children", allow_duplicate=True),
-            Output({'type': 'row-number-store', 'index': MATCH}, 'data'),
             Input({'type': 'load-next-rows-button', 'index': MATCH}, 'n_clicks'),
-            State({'type': 'predicate_output', 'index': MATCH}, 'children'),
-            State({'type': 'query-result', 'index': MATCH}, 'data'),
-            State({'type': 'row-number-store', 'index': MATCH}, 'data'),
             State("qname_index", "data"),
             prevent_initial_call=True
         )
-        def load_next_10_rows(n_clicks, current_output, stored_data, current_rows, query_index):
-            if n_clicks > 0:
-                
-                new_row_number = current_rows + 10
+        def load_next_10_rows(nClicks, query_index):
+            '''
+            This callback loads the next 10 rows when the "Load Next 10 Rows" button is clicked.
+            '''
 
-                # Create the updated DataTable
+            if nClicks > 0:
+                query_key = f'Query{query_index + 1}'
+
+                # Calculate the number of rows to display based on click count
+                new_row_number = max(10, 10 * (nClicks + 1))
+                print(f"New row number: {new_row_number}")
+
+                result, self.num_cases, self.num_events = VelPredicate.run_predicate(self.log_view, self.conditions, query_key, new_row_number)
+
+                if result is None or result.empty:
+                    return html.Div[("No data available for the selected filters.")]
+
                 table = dash_table.DataTable(
-                    columns=[{"name": i, "id": i} for i in stored_data[0].keys()],
-                    data=stored_data[:new_row_number],  # Display updated set of rows
+                    columns=[{"name": i, "id": i} for i in result.columns],
+                    data=result[:new_row_number].to_dict('records'),
                     page_size=10,
                     page_action='native',
                     style_table={'overflowX': 'auto'},
                     style_cell={'textAlign': 'left'}
                 )
 
-                # Retain existing shape info and load more options
-                
                 shape_info = html.Div([
                     html.Span(f"Number of Cases: {self.num_cases}", style={'fontWeight': 'bold', 'marginRight': '20px'}),
                     html.Span(f"Number of Events: {self.num_events}", style={'fontWeight': 'bold'})
                 ], style={'marginBottom': '10px'})
 
                 load_more_options = html.Div([
-                    dbc.Button("Load Next 10 Rows", id={'type': 'load-next-rows-button', 'index': query_index}, n_clicks=0, style={'marginRight': '10px'}),
+                    dbc.Button("Load Next 10 Rows", id={'type': 'load-next-rows-button', 'index': query_index}, n_clicks= nClicks, style={'marginRight': '10px'}),
                     dbc.Button("Load Full Table", id={'type': 'load-full-table-button', 'index': query_index}, n_clicks=0, style={'marginRight': '10px'}),
-                ], style={'marginTop': '10px'})
+                ], style={'marginTop': '10px','display': 'flex', 'justifyContent': 'flex-end'})
 
-                return html.Div([shape_info, table, load_more_options]), new_row_number
+                return html.Div([shape_info, table, load_more_options])
 
             return dash.no_update
-
-
-
-        # Callback for handling the "Load Full Table" functionality
+        
+        # Load full table
         @app.callback(
             Output({'type': 'predicate_output', 'index': MATCH}, "children", allow_duplicate=True),
             Input({'type': 'load-full-table-button', 'index': MATCH}, 'n_clicks'),
-            State({'type': 'query-result', 'index': MATCH}, 'data'),
+            State("qname_index", "data"),
+            State({'type': 'query_name', 'index': MATCH}, 'value'),
             prevent_initial_call=True
         )
-        def load_full_table(n_clicks, stored_data):
+        def load_full_table(n_clicks, query_index, query_name):
+            '''
+            This callback loads the full table when the "Load Full Table" button is clicked.
+            '''
+
             if n_clicks > 0:
 
+                query_key = f'Query{query_index + 1}'
+                key = query_key+query_name
+
+                result, self.num_cases, self.num_events = VelPredicate.run_predicate(self.log_view, self.conditions, query_key, 0)
+
+                if result is None or result.empty:
+                    return html.Div[("No data available for the selected filters.")]
+
+                cache_query_result(key, result)
+
                 table = dash_table.DataTable(
-                    columns=[{"name": i, "id": i} for i in stored_data[0].keys()],
-                    data=stored_data,
-                    page_size=10,  # Adjust the page size if needed
+                    columns=[{"name": i, "id": i} for i in result.columns],
+                    data= result.to_dict('records'),
+                    page_size=10,  
                     style_table={'overflowX': 'auto'},
                     style_cell={'textAlign': 'left'},
-                    page_action='native'  # Enables pagination
+                    page_action='native'  
                 )
 
                 shape_info = html.Div([
@@ -1809,120 +2006,49 @@ class Vel:
                     html.Span(f"Number of Events: {self.num_events}", style={'fontWeight': 'bold'})
                 ], style={'marginBottom': '10px'})
 
-
                 return html.Div([shape_info, table])
 
             return dash.no_update
 
-
-
-        # @app.callback(
-        #     Output({'type': 'predicate_output', 'index': MATCH}, "children"),
-        #     [
-        #         Input({"type": "submit", "index": ALL}, "n_clicks"),
-        #         # Input({"type": "label-container", "index": ALL}, "children"),
-        #         # Input({"type": "log_selector", "index": ALL}, "value"),
-        #     ],
-        #     State("qname_index", "data"),
-        #     #  State({'type': 'query_name', 'index': ALL}, "value")],
-        #     prevent_initial_call=True
-        # )
-        # def on_button_click(n_clicks, query_index):
-
-        #     if n_clicks[0] is None:
-        #         raise dash.exceptions.PreventUpdate
-
-            
-        #     # Initial loading state with the skeleton
-        #     skeleton = fac.AntdSkeleton(
-        #         loading=True,
-        #         active=True,
-        #         title=True,
-        #         paragraph={'rows': 20}
-        #     )
-
-        #     # Show the skeleton while processing
-        #     if n_clicks[0] > 0:
-               
-        #         # result = VelPredicate.run_predicate(self.log_view, self.log, self.conditions, f'Query{query_index + 1}')
-        #         # VelPredicate.apply_label_to_result(self.log_view, result, label)
-        #         result = VelPredicate.run_predicate(self.log_view, self.conditions, f'Query{query_index + 1}')
-
-        #         # Once processing is done, hide the skeleton and show the table
-        #         if result is None or result.empty:
-        #             return html.Div("No data available for the selected predicate.")
                 
-        #         table = dash_table.DataTable(
-        #             columns=[{"name": i, "id": i} for i in result.columns],
-        #             data=result.to_dict('records'),
-        #             page_action="native",
-        #             page_current=0,
-        #             page_size=10,
-        #         )
-
-        #         return fac.AntdSkeleton(
-        #             loading=False,  # Hide skeleton, show table
-        #             active=True,
-        #             paragraph={'rows': 20},
-        #             children=[table]
-        #         )
-
-        #     return skeleton
-
-
-        # @app.callback(
-        #     # Output({'type': 'shadow-loading', 'index': MATCH}, 'style'),
-        #     Output({'type': 'predicate_output', 'index': MATCH}, "children"),
-        #     [
-        #         Input({"type": "submit", "index": ALL}, "nClicks"),
-        #         State("qname_index", "data")
-        #     ],
-        #     prevent_initial_call=True
-        # )
-        # def on_button_click(n, query_index):
-        #     if n[0] >= 1:
-        #         # Show shadow loading
-        #         loading_style = {"display": "block"}
-                
-        #         # Simulate data processing
-        #         time.sleep(3)  # Replace this with the actual `run_predicate` logic
-                
-        #         # Hide shadow loading and show results
-        #         loading_style = {"display": "none"}
-                
-        #         # Real DataTable rendering
-        #         result = VelPredicate.run_predicate(self.log_view, self.log, self.conditions, f'Query{query_index + 1}')
-                
-        #         if result is None or result.empty:
-        #             return loading_style, html.Div("No data available for the selected predicate.")
-
-        #         table = dash_table.DataTable(
-        #             columns=[{"name": i, "id": i} for i in result.columns],
-        #             data=result.to_dict('records'),
-        #             page_action="native",
-        #             page_current=0,
-        #             page_size=10,
-        #         )
-                
-        #         return loading_style, table
-
-        #     return dash.no_update,
-        #     # dash.no_update
-
-        
-        
-
+    
         return app
 
     def open_browser(self, PORT):
-        webbrowser.open("http://127.0.0.1:{}".format(PORT))
+        '''
+        This method opens the default web browser to the Query Builder application.
+        '''
+
+        webbrowser.open_new("http://127.0.0.1:{}".format(PORT))
+
+    def flush_redis_on_start(self):
+        '''
+        This method flushes the Redis cache on startup.
+        '''
+
+        try:
+            r = Redis(host='localhost', port=6379, db=0)
+            r.flushall()  
+            print("Redis cache cleared on startup.")
+        except Exception as e:
+            print(f"Error flushing Redis cache: {e}")
 
     def run_Query_Builder(self):
+        '''
+        This method runs the Query Builder application.
+        '''
+
         print("Running Query Builder")
+        self.flush_redis_on_start()
+
         app = self.Query_Builder_v5()
         if app is None:
             raise ValueError("App is None, there is an issue with the Query_Builder_v5 method.")
-        print(f"App is ready to run at : http://127.0.0.1:{constants.QUERYPORT}")
-        app.run_server(port=constants.QUERYPORT, open_browser=True, debug=True)
-
         
+        PORT = constants.QUERYPORT
+        print(f"App is ready to run at: http://127.0.0.1:{PORT}")
+
+        Timer(1, self.open_browser, args=[PORT]).start()
+
+        # Run the Dash app
+        app.run_server(port=PORT, debug=True, dev_tools_ui=True, dev_tools_props_check=True)

@@ -12,7 +12,7 @@ class VelPredicate:
         print(parameters)
         return parameters
     
-    def run_predicate(log_view, conditions, query_name):
+    def run_predicate(log_view, conditions, query_name, n):
         """Evaluates the given conditions against the log and stores the results."""
         print(f"Running predicates for query: {query_name}, conditions: {conditions}")
 
@@ -27,11 +27,15 @@ class VelPredicate:
         label = query_data.get('label', '')
         selected_log_name = query_data.get('source_log', '')
         condition_list = query_data.get('conditions', [])
+
+        print(f"source_log: {query_data.get('source_log', '')}")
         
         predicates = []
 
         if isinstance(selected_log_name, list):
-            selected_log_name = selected_log_name[0]  # Handling if it's a list
+            selected_log_name = selected_log_name[0] 
+            print(f"Selected log: {selected_log_name}") 
+
         selected_log_dataframe = log_view.result_set_name_cache.get(selected_log_name)
 
         if selected_log_dataframe is None:
@@ -44,7 +48,7 @@ class VelPredicate:
             values = condition.get('values')
             min_duration = condition.get('min_duration_seconds')
             max_duration = condition.get('max_duration_seconds')
-
+            print(f"in loop velpre:")
             # Instantiate the predicate based on the available arguments
             if attribute_key is not None and values is not None:
                 predicate_instance = predicate_class(attribute_key, values)
@@ -54,14 +58,15 @@ class VelPredicate:
                 predicate_instance = predicate_class(values)
 
             predicates.append(predicate_instance)
+            print(f"Predicate Instance: {predicate_instance}, {predicates}")
 
-        # Create a Query instance based on the query name and predicates
+
         query_instance = Query(query_name_value, predicates)
 
-        # Evaluate the query against the log data
         rs_no_p, comp_rs_no_p = log_view.evaluate_query(f'rs_{query_name_value}', selected_log_dataframe, query_instance)
 
-        # Store the result sets in the result_sets dictionary (optional, for your use case)
+        print(f"Result set for query: {query_name}, and log{selected_log_name} has been stored as 'rs_{query_name_value}'")
+
         VelPredicate.result_sets.update({
             f'rs_{query_name_value}': rs_no_p,
             f'comp_rs_{query_name_value}': comp_rs_no_p
@@ -69,9 +74,11 @@ class VelPredicate:
 
         log_view.label_result_set(rs_no_p, label)
         print(f"Applied label '{label}' to result set for query: {query_name}, and log{selected_log_name}") 
-        # Return the primary result set
-        # return VelPredicate.result_sets[f'rs_{query_name_value}'],
-        return rs_no_p
+
+        if n == 0:
+            return rs_no_p,len(rs_no_p['case:concept:name'].unique()),len(rs_no_p)
+        else:
+            return rs_no_p[:n],len(rs_no_p['case:concept:name'].unique()),len(rs_no_p)
 
     
     def apply_label_to_result(log_view, query_name, label):
