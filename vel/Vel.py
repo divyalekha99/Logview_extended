@@ -2,11 +2,9 @@ from dash import jupyter_dash
 from dash import Dash, dash_table, dcc, html, Input, Output, callback, State, clientside_callback, no_update
 import pandas as pd 
 import pm4py
-import logview
 from logview.utils import LogViewBuilder
 from logview.predicate import *
 from VelPredicate import VelPredicate
-import inspect
 from dash.exceptions import PreventUpdate
 from dash.dependencies import MATCH, ALL
 import dash_bootstrap_components as dbc
@@ -17,7 +15,6 @@ import time
 import webbrowser
 from threading import Timer
 import constants
-import json
 from functools import lru_cache
 from flask import Flask
 from redis import Redis
@@ -57,8 +54,9 @@ class Vel:
         ''' 
         This function initializes the query based on the index.
         '''
-
+        
         query_key = f'Query{index + 1}'
+         
         if query_key not in self.conditions:
             self.conditions[query_key] = {
                 'query_name': '',
@@ -66,6 +64,7 @@ class Vel:
                 'source_log': '',
                 'conditions': []
             }
+         
 
     def update_condition(self, index, condition_index, field, value):
         '''
@@ -86,7 +85,8 @@ class Vel:
                 })
             conditions[condition_index][field] = value
         else:
-            print(f"Query '{query_key}' not found. Please initialize it first.")
+            print(f"Query {index + 1} not found in conditions.")
+             
 
     
     def changeDefaultNames(self, caseId, activity, timestamp):
@@ -515,16 +515,13 @@ class Vel:
         server = Flask(__name__)
         redis_cache = Redis(host='localhost', port=6379, db=0)  
 
-        # Initialize Dash app with Flask server
+
         app = Dash(__name__, server=server, external_stylesheets=[dbc.themes.BOOTSTRAP,"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css",
                 "https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css"])
 
+        app.title = "Query Builder"
 
-        # app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP,"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css",
-        #         "https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css"])
-        
-        self.initialize_query(0)
-        app.layout = html.Div(
+        app.layout= html.Div(
             className="app-container mb-4",
             style={
             },
@@ -623,6 +620,8 @@ class Vel:
 
                            
                             dcc.Store(id='qname_index', data=0),
+                            dcc.Store(id='reset', data=0),
+                            dcc.Location(id='url', refresh=False),
 
                         ], className="card-content", style={})  
                     ]), 
@@ -633,8 +632,6 @@ class Vel:
                 )
             ]
         )
-        
-
         
         # Callback for handling scroll to the last added condition
         @app.callback(
@@ -672,7 +669,6 @@ class Vel:
             [
                 Output('tabs', 'items', allow_duplicate=True),
                 Output('tabs', 'defaultActiveKey', allow_duplicate=True),
-                
             ],
             Input('add-query-button', 'nClicks'),
             State('tabs', 'items'),
@@ -680,25 +676,24 @@ class Vel:
         )
         def add_query_tab(nClicks, current_tabs):
             '''
-            This function adds a new query tab.
+            This function adds a new query tab with a unique index after checking 
+            for the maximum tab index to avoid duplication of indices.
             '''
 
             if nClicks is None:
                 raise dash.exceptions.PreventUpdate
 
-            new_index = len(current_tabs)
+            if current_tabs:
+                tab_indices = [int(tab['key'].split('-')[-1]) for tab in current_tabs]
+                max_index = max(tab_indices)
+            else:
+                max_index = 0  
 
-            # Generate a new tab
+            new_index = max_index + 1
+
             new_tab = self.generate_query_tab(new_index)
 
-            key = f'Query{new_index + 1}'
-
-            self.tab_content_cache[key] = new_tab 
-            
-            print(type(self.tab_content_cache), self.tab_content_cache)
-
             current_tabs.append(new_tab)
-
 
             return current_tabs, f'tab-{new_index}'
 
@@ -723,112 +718,27 @@ class Vel:
 
 
         @app.callback(
-            Output('tabs', 'items', allow_duplicate=True),
-            Output('tabs', 'defaultActiveKey', allow_duplicate=True),
-            Input('tabs', 'latestDeletePane'),
-            State('tabs', 'items'),
-            State('tabs', 'activeKey'),
+            [Output('tabs', 'items', allow_duplicate=True),
+            Output('tabs', 'activeKey', allow_duplicate=True)],
+            [Input('tabs', 'latestDeletePane')],
+            [State('tabs', 'items'), State('tabs', 'activeKey')],
             prevent_initial_call=True
         )
-        def delete_query_tab(latestDeletePane, current_tabs, activeKey):
-            '''
-            This function deletes a query tab and reindexes the remaining tabs and conditions.
-            '''
-
-            
-
+        def delete_query_tab(latestDeletePane, current_tabs, active_key):
             if latestDeletePane is None:
                 raise dash.exceptions.PreventUpdate
 
-              
-            index_to_remove = int(latestDeletePane.split('-')[-1])
-
-              
-            self.query_tab_cache.pop(index_to_remove, None)
-
-              
-            query_key_to_remove = f"Query{index_to_remove + 1}"
-            if query_key_to_remove in self.conditions:
-                self.conditions.pop(query_key_to_remove, None)
-
-              
             updated_tabs = [tab for tab in current_tabs if tab['key'] != latestDeletePane]
 
-              
-            new_conditions = {}
-            updated_content = {}    
+            new_active_key = updated_tabs[0]['key'] if active_key == latestDeletePane else dash.no_update
 
-            def update_tab_content(old_query_key, new_query_key, tab_index):
-                """
-                This function updates the content of a tab after deletion and remapping.
-                It renames the child component IDs and state data accordingly.
-                """
-                if old_query_key not in self.tab_content_cache:
-                    raise KeyError(f"No content found for {old_query_key}")
-
-                tab_content = self.tab_content_cache[old_query_key]    
-
-                  
-                for element in tab_content['children']:
-                      
-                    print(element)
-                    if isinstance(element, dict):
-                        element_id = element.get('id')
-                        
-                        if isinstance(element_id, dict) and 'index' in element_id:
-                            index = element_id['index']
-
-                            if isinstance(index, str) and '-' in index:
-                                index_parts = index.split('-')
-                                index_parts[0] = str(tab_index)  
-                                element_id['index'] = '-'.join(index_parts)  
-                            elif isinstance(index, int):
-                                element_id['index'] = tab_index
-                                print('Element ID: ', element_id)
-                                print('Tab Index: ', tab_index)
-
-                  
-                self.tab_content_cache[new_query_key] = tab_content
-                print('Tab Content: ', tab_content)
-
-                return tab_content
-
-              
-            for new_index, tab in enumerate(updated_tabs):
-                  
-                tab['key'] = f'tab-{new_index}'    
-                tab['label'] = f'Query {new_index + 1}'    
-
-                  
-                old_query_key = f"Query{new_index + 1 + (1 if new_index >= index_to_remove else 0)}"    
-                new_query_key = f"Query{new_index + 1}"    
-
-                  
-                if old_query_key in self.conditions:
-                    new_conditions[new_query_key] = self.conditions[old_query_key]
-
-                  
-                if old_query_key in self.tab_content_cache:
-                    tab_content = update_tab_content(old_query_key, new_query_key, new_index)
-                    updated_content[new_query_key] = tab_content
-
-              
-            self.conditions = new_conditions
-            self.tab_content_cache = updated_content    
-
-              
-            if latestDeletePane == activeKey:
-                new_active_key = updated_tabs[0]['key'] if updated_tabs else None
-            else:
-                new_active_key = dash.no_update
+            query_key = f"Query{int(latestDeletePane.split('-')[1])+1}"  
+             
+            if query_key in self.conditions:
+                del self.conditions[query_key]
+                 
 
             return updated_tabs, new_active_key
-
-            
-
-
-
-
 
 
 
@@ -917,7 +827,6 @@ class Vel:
 
             if not triggered_id:
                 return dash.no_update
-
             
             triggered_close_counts = ctx.triggered[0]['value']
 
@@ -956,8 +865,8 @@ class Vel:
 
             evaluations = summary_data['evaluations']
             queries = summary_data['queries']
-            print("Evaluations: ", evaluations)
-            print("Queries: ", queries)
+             
+             
 
             timeline_items = []
 
@@ -1041,8 +950,11 @@ class Vel:
 
             triggered_id = dash.callback_context.triggered[0]['prop_id'].split('.')[0]
 
+
             if 'add-condition-button' in triggered_id:
                 condition_count += 1
+            else:
+                raise dash.exceptions.PreventUpdate
 
             if existing_conditions is None:
                 existing_conditions = []
@@ -1056,17 +968,17 @@ class Vel:
                                 dbc.Col(
                                     fac.AntdDivider(
                                         fac.AntdSpace(
-                                               [
-                                                   fac.AntdTag(
-                                                       content='AND',
-                                                       bordered=True,
-                                                       color='blue',
-                                                   )
+                                            [
+                                                fac.AntdTag(
+                                                    content='AND',
+                                                    bordered=True,
+                                                    color='blue',
+                                                )
                                                 ],
                                                 wrap=True,
                                             ), innerTextOrientation='center'),
 
-                                    width=12, align="center"
+                                        width=12, align="center"
                                 )
                             ], 
                             ),
@@ -1084,8 +996,8 @@ class Vel:
                                 ),className='radio-group-container',
                                 width=10, align='start' ,style={'paddingLeft': '0vw', 'width': '55vw'}
                             ),
-                           dbc.Col(
-                               fac.AntdTooltip(
+                        dbc.Col(
+                            fac.AntdTooltip(
                                 fac.AntdIcon(
                                     id={'type': 'remove-condition-button', 'index': f'{index}-{condition_count}'},
                                     nClicks=0,
@@ -1120,6 +1032,7 @@ class Vel:
 
 
 
+
         @app.callback(
             Output({'type': 'condition-container', 'index': ALL}, 'children', allow_duplicate=True),
             Output({'type': 'condition-store', 'index': ALL}, 'data', allow_duplicate=True),
@@ -1130,14 +1043,13 @@ class Vel:
         )
         def remove_condition(n_clicks, all_conditions, condition_count):
             '''
-            This function removes a condition from the query.
+            This function removes a condition from the query in both the UI and self.conditions.
             '''
 
             ctx = dash.callback_context
             if not ctx.triggered:
                 raise dash.exceptions.PreventUpdate
 
-           
             for i, clicks in enumerate(n_clicks):
                 if clicks > 0:
                     triggered_index = i
@@ -1148,21 +1060,39 @@ class Vel:
             triggered_prop_id = ctx.triggered[0]['prop_id']
             triggered_id = eval(triggered_prop_id.split('.')[0])
 
+           
             full_index = triggered_id['index']
-            condition_index_to_remove = int(full_index.split('-')[-1])
+            query_index = int(full_index.split('-')[0])  
+            condition_index_to_remove = int(full_index.split('-')[-1])  
+            # print("condition_index_to_remove",full_index,condition_index_to_remove)
 
-            if 'remove-condition-button' in triggered_id['type'] and condition_count[0] >= 1:
-                condition_count[0] -= 1
+            if 'remove-condition-button' in triggered_id['type'] and condition_count[query_index] >= 1:
+                condition_count[query_index] -= 1
+            else:
+                raise dash.exceptions.PreventUpdate
 
             updated_conditions = []
             for i, conditions in enumerate(all_conditions):
-                if i == int(full_index.split('-')[0]):
-                    # This is the container to update
+                print("len(conditions)",len(conditions), i, conditions)
+                if i == query_index:
                     if 0 <= condition_index_to_remove < len(conditions):
+                        print("popped")
                         conditions.pop(condition_index_to_remove)
                 updated_conditions.append(conditions)
 
+            query_key = f"Query{query_index + 1}"  
+
+            if query_key in self.conditions:
+                if 0 <= condition_index_to_remove < len(self.conditions[query_key]['conditions']):
+ 
+                    self.conditions[query_key]['conditions'].pop(condition_index_to_remove)
+
+                    for idx, condition in enumerate(self.conditions[query_key]['conditions']):
+                        condition['index'] = idx
+
             return updated_conditions, condition_count
+
+
 
 
         @app.callback(
@@ -1238,7 +1168,6 @@ class Vel:
                     unique_values = self.df['Activity'].unique()
 
                     tooltip_text = "Selecting multiple values will apply a logical OR operation. Any of the selected values will satisfy the condition."
-
 
                     return html.Div([
                         dbc.Row([
@@ -1332,6 +1261,7 @@ class Vel:
             Output({'type': 'qname-store', 'index': MATCH}, 'data'),
             Input({'type': 'query_name', 'index': MATCH}, 'value'),
             State({'type': 'query_name', 'index': MATCH}, "id"),
+            prevent_initial_call=True
         )
 
         def store_qname(qname, query_index):
@@ -1340,8 +1270,12 @@ class Vel:
             '''
 
             query_index = query_index['index']
+            if self.conditions.get(f'Query{query_index + 1}'):
+                self.conditions[f'Query{query_index + 1}']['query_name'] = qname
+            else:
+                self.initialize_query(query_index)
+                self.conditions[f'Query{query_index + 1}']['query_name'] = qname
 
-            self.conditions[f'Query{query_index + 1}']['query_name'] = qname
 
             return qname
 
@@ -1372,7 +1306,8 @@ class Vel:
                 State({'type': 'groupby_options', 'index': ALL}, 'id'),
                 State({'type': 'value_equality', 'index': ALL}, 'id'),
                 State("qname_index", "data")
-            ]
+            ],
+            prevent_initial_call=True
         )
         def update_query_display(attr_keys, attr_keys_groupby , value_inputs, values_list, predicates, time_units, min_durations, max_durations, group_by_values, value_equalities,
                                 attr_key_ids, attr_keys_groupby_ids, value_input_ids, values_dropdown_ids, predicate_ids, time_unit_ids, min_duration_ids, max_duration_ids, group_by_ids, value_equality_ids,
@@ -1399,15 +1334,13 @@ class Vel:
             relevant_group_by_values = filter_relevant_inputs(group_by_values, group_by_ids)
             relevant_value_equalities = filter_relevant_inputs(value_equalities, value_equality_ids)
 
-            # Rest of your query display logic remains the same
-
-
-
             query_key = f'Query{query_index + 1}'
             query_data = self.conditions.get(query_key, {})
             query_name = query_data.get('query_name', '')
 
             query_str = f"Query('{query_name}', "
+             
+             
 
             condition_strs = []
             for i, (predicate, predicate_id) in enumerate(relevant_predicates):
@@ -1431,6 +1364,7 @@ class Vel:
                     attribute_key = next((val for val, val_id in relevant_attr_keys if val_id['index'].split('-')[1] == str(cond_index)), None)
                     value = next((val for val, val_id in relevant_value_equalities if val_id['index'].split('-')[1] == str(cond_index)), None)
                     condition_strs.append(f"{predicate.split()[0]}('{attribute_key}', '{value}')")
+                     
 
                 elif predicate in ['GreaterEqualToConstant ≥', 'LessEqualToConstant ≤', 'GreaterThanConstant >', 'LessThanConstant <']:
                     attribute_key = next((val for val, val_id in relevant_attr_keys if val_id['index'].split('-')[1] == str(cond_index)), None)
@@ -1445,24 +1379,30 @@ class Vel:
 
             num_outputs = len(dash.callback_context.outputs_list)
 
-            outputs = [
-                html.Pre(query_str, style={
-                    'whiteSpace': 'pre-wrap',
-                    'wordBreak': 'break-word',
-                    'backgroundColor': '#f8f9fa',
-                    'borderRadius': '5px',
-                    'border': '1px solid #dee2e6',
-                    'fontSize': '14px',
-                    'justifyContent': 'center',
-                    'alignItems': 'center',
-                    'height': '40px',
-                    'textAlign': 'center',
-                    'alignContent': 'center',
-                }) if i == query_index else dash.no_update
-                for i in range(num_outputs)
-            ]
+            output_indices = [output['id']['index'] for output in dash.callback_context.outputs_list]
+    
+            outputs = []
+            for i, output_index in enumerate(output_indices):
+                if output_index == query_index:
+                    output = html.Pre(query_str, style={
+                        'whiteSpace': 'pre-wrap',
+                        'wordBreak': 'break-word',
+                        'backgroundColor': '#f8f9fa',
+                        'borderRadius': '5px',
+                        'border': '1px solid #dee2e6',
+                        'fontSize': '14px',
+                        'justifyContent': 'center',
+                        'alignItems': 'center',
+                        'height': '40px',
+                        'textAlign': 'center',
+                        'alignContent': 'center',
+                    })
+                    outputs.append(output)
+                else:
+                    outputs.append(dash.no_update)
 
             return outputs
+
 
 
 
@@ -1544,7 +1484,8 @@ class Vel:
                 Input({'type': 'time_unit_dropdown', 'index': MATCH}, 'value'),
                 Input({'type': 'min_duration', 'index': MATCH}, 'id'),
                 State("qname_index", 'data'),
-            ]
+            ],
+            prevent_initial_call=True
         )
         def update_duration_output(min_duration, max_duration, unit, cond_id, query_index):
             '''
@@ -1552,7 +1493,7 @@ class Vel:
             '''
         
             if min_duration is None or max_duration is None:
-                print("One of the durations is None, returning empty.")
+                 
                 return []
 
 
@@ -1609,7 +1550,8 @@ class Vel:
                 Input({'type': 'groupby_options', 'index': MATCH}, "value"),
                 Input({'type': 'groupby_options', 'index': MATCH}, "id"),
                 State("qname_index", 'data')
-            ]
+            ],
+            prevent_initial_call=True
         )
         def update_groupby_output(selected_value, cond_id, query_index):
             '''
@@ -1752,6 +1694,7 @@ class Vel:
             Output({'type':'log_selector', 'index': MATCH}, 'value'),
             Input({'type':'log_selector', 'index': MATCH}, 'value'),
             State("qname_index", "data"),
+            prevent_initial_call=True
         )
         def update_log_selector(selected_log, query_index):
             '''
@@ -1765,6 +1708,7 @@ class Vel:
             Output({'type': 'label-store', 'index': MATCH}, 'data'),
             Input({"type": "label-container", "index": MATCH}, "children"),
             State("qname_index", "data"),
+            prevent_initial_call=True
         )
         def update_label_container(labels, query_index):
             '''
@@ -1937,7 +1881,7 @@ class Vel:
 
                 # Calculate the number of rows to display based on click count
                 new_row_number = max(10, 10 * (nClicks + 1))
-                print(f"New row number: {new_row_number}")
+                 
 
                 result, self.num_cases, self.num_events = VelPredicate.run_predicate(self.log_view, self.conditions, query_key, new_row_number)
 
@@ -2040,7 +1984,10 @@ class Vel:
 
         print("Running Query Builder")
         self.flush_redis_on_start()
-
+        
+        self.conditions = {}
+        self.initialize_query(0)
+         
         app = self.Query_Builder_v5()
         if app is None:
             raise ValueError("App is None, there is an issue with the Query_Builder_v5 method.")
@@ -2051,4 +1998,4 @@ class Vel:
         Timer(1, self.open_browser, args=[PORT]).start()
 
         # Run the Dash app
-        app.run_server(port=PORT, debug=True, dev_tools_ui=True, dev_tools_props_check=True)
+        app.run_server(port=PORT, debug=False, dev_tools_ui=False, dev_tools_props_check=False)
