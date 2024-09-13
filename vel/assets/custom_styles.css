@@ -1,24 +1,19 @@
-/* Body and Font Setup */
+
 body {
     font-family: 'Plus Jakarta Sans', 'Noto Sans', sans-serif;
-    background-color: #bad2ea !important; /* Light blue background */
+    background-color: #bad2ea !important; 
     color: #fbfcfd;
     margin: 30px !important;
-    /* padding: 0; */
-    /* height: 100vh; */
-    /* display: flex; */
-    /* align-items: center; */
-    /* justify-content: center; */
-    -ms-overflow-style: none;  /* IE and Edge */
+    -ms-overflow-style: none;  
     scrollbar-width: none;
 }
 
 .custom-disabled-radio .ant-radio-button-wrapper-disabled {
-    color: #3464d5 !important; /* Set your desired color */
-    background-color: #c4d7f6 !important; /* Background color for the disabled option */
-    border-color: #c4c4c4 !important; /* Border color */
-    cursor: not-allowed; /* Change the cursor */
-    font-weight: bold; /* Optional: Make text bold */
+    color: #3464d5 !important;
+    background-color: #c4d7f6 !important; 
+    border-color: #c4c4c4 !important; 
+    cursor: not-allowed; 
+    font-weight: bold; 
 }
 
 
@@ -26,13 +21,13 @@ body {
     background-color: #bad2ea;
     color: #081621;
     display: flex;
-    min-height: 90vh;  /* Ensures full viewport height */
+    min-height: 90vh;   
 }
 
-/* Header */
+ 
 header {
     background-color: #ffffff;
-    /* border-bottom: 1px solid #dae9f6; */
+     
     padding: 20px 40px;
 }
 
@@ -42,38 +37,39 @@ header h2 {
 }
 .condition-container {
     max-height: 30vh;
+    overflow-x: hidden;
     overflow-y: auto;
     border: 2px dotted #d3d3d3;
     padding: 10px;
     border-radius: 5px;
-    background-color: #a5abb105; /* Light background color */
+    background-color: #a5abb105;  
 }
 
-/* Style for proper alignment of radio buttons */
+ 
 .radio-group-container {
     display: flex;
     flex-wrap: wrap;
-    justify-content: flex-start; /* Ensure left alignment */
-    gap: 10px; /* Adds spacing between radio buttons */
+    justify-content: flex-start;  
+    gap: 10px;  
 }
 
-/* Responsive adjustments for smaller screens */
+ 
 @media only screen and (max-width: 768px) {
     .radio-group-container {
-        justify-content: flex-start; /* Ensure the buttons align on small screens */
-        flex-wrap: wrap; /* Make sure buttons wrap properly */
+        justify-content: flex-start;  
+        flex-wrap: wrap;  
     }
 }
 
 
 
-/* Card Background */
+ 
 .card-container {
     background-color: #ffffff;
     border: none;
-    /* padding: 20px; */
+     
     margin: 10px auto;
-    /* background-color: white; */
+     
     box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2);
     border-radius: 25px;
     opacity: 0.9;
@@ -81,22 +77,22 @@ header h2 {
 }
 
 
-/* Tabs */
+ 
 .dash-tabs .nav-item .nav-link {
     color: #000000;
     font-weight: 700;
-    /* #2d77b4; */
-    /* justify-content: center; */
+     
+     
 }
 
 .dash-tabs .nav-item .nav-link.active {
     border-color: #0165DA;
     color: #081621;
     font-weight: 700;
-    /* justify-content: center; */
+     
 }
 
-/* Input Fields */
+ 
 input, .form-control {
     background-color: #eff5fb;
     border: 1px solid #c2dbf0;
@@ -107,7 +103,7 @@ input::placeholder {
     color: #0165DA;
 }
 
-/* Buttons */
+ 
 button, .btn {
     border-radius: 4px;
     font-weight: 700;
@@ -140,52 +136,15 @@ button, .btn {
 }
 
 .custom-trash-button:hover {
-    color: #5c636a;  /* Adjust the color as desired */
-    background-color: transparent; /* Ensures the background stays transparent */
+    color: #5c636a;   
+    background-color: transparent;  
 }
 .custom-separator {
-    margin-left: 20px; /* Add space between groups */
+    margin-left: 20px;  
 }
 
-
-/* .radio-group-container {
-    display: grid;
-    grid-template-columns: repeat(1, 1fr); 
-    gap: 30px;
-} */
-
-/* Hide scrollbar for Chrome, Safari and Opera */
+/* Hide scrollbar for Chrome, Safari and Opera 
 ::-webkit-scrollbar {
     display: none;
 }
-
-
-/* .equal-width-buttons .ant-radio-button-wrapper {
-    flex: 1 1 50%; 
-    text-align: center; 
-    padding: 10px; 
-    box-sizing: border-box; 
-} */
-
-
-/* @keyframes loading {
-    0% {
-      background-position: -200px 0;
-    }
-    100% {
-      background-position: calc(200px + 100%) 0;
-    }
-  }
-  
-  .shadow-loading {
-    animation: loading 1.5s infinite;
-    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-    background-size: 200px 100%;
-    border-radius: 4px;
-  }
-  
-  .loading-placeholder {
-    height: 20px;
-    margin: 10px 0;
-  } */
-  
+*/
