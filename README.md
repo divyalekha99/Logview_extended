@@ -1,5 +1,7 @@
 [![GPL-3.0 License](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
+Query Builder (VelUI): Interactive Process Mining Queries Powered by LogView
+
 <!-- PROJECT LOGO -->
 <br />
 <div align="center">
@@ -9,11 +11,8 @@
 </div>
 
 ## About the project
-We present **LogView**, a framework that helps process analysts validate the results of their queries and incrementally improve their knowledge of a log as they analyze it.
-LogView keeps a record of the evaluated queries and results, and facilitates the comparison of different results with the intention of facilitating the analyst's understanding of the data.
-We have implemented it as a Python library to help you integrate it into your existing process mining environments.
-
-We provide an extensive tutorial and an analysis on the [Road Traffic Fine Management event log](https://data.4tu.nl/articles/dataset/Road_Traffic_Fine_Management_Process/12683249?file=24018146) in [notebooks](https://github.com/blindreview-logview123/logview/tree/main/notebooks).
+We present **Query Builder (VelUI)**, an interactive tool that extends LogView’s process mining framework with visual, no-code capabilities for building, running, and comparing event log queries. With Query Builder, you can create complex queries, manage multiple analyses, and review results all in one place. This brings process analytics to everyone, not just programmers.
+Under the hood, Query Builder is powered by **LogView**, a Python framework that records, tracks, and compares event log queries and their results. LogView is implemented as a standalone library to help you integrate it into your existing process mining environments.
 
 
 <!-- GETTING STARTED -->
@@ -62,34 +61,30 @@ Once installed, you can import LogView into their Python scripts or Jupyter Note
 import logview
 ```
 <!-- USAGE FEATURES -->
-## Key Features ##
 
-- Querying Logs: LogView allows users to execute queries on event logs to extract relevant information.
-- Record of Evaluated Queries and Results: LogView keeps a record of the queries executed and their corresponding results, facilitating traceability and reproducibility.
-- Result Characterization: LogView provides plugins to characterize the results of a query along multiple dimensions.
-- Result Comparison: LogView provides plugins to compare different query results, aiding analysts in understanding the relationships among results produced by different queries.
-- Result Visualization: LogView provides plugins to visualize multiple result sets and their overlaps.
+## Key Features ##
+Query Builder (VelUI) brings LogView into an interactive, visual workspace with:
+- Multiple queries in tabs: Easily create, manage, and compare different analyses in separate tabs.
+- Dynamic, context-aware input: Input fields and options update based on the predicates and conditions you choose.
+- Live query preview: See your query string update in real time as you configure it.
+- Instant results: Run queries directly from the UI and see the output immediately.
+- Query summary and history: Review all your executed queries and results in one place.
+All queries, results, and comparisons are powered by the LogView backend so you get full analytics, but in a much more accessible way.
+
 
 <!-- USAGE EXAMPLES -->
 ## Usage Examples ##
 
-In the example below, we show how to create a _logview_ object for your analysis and to run your first query.
+In the example below, we show how the query is constructed.
+<img width="1126" height="559" alt="image" src="https://github.com/user-attachments/assets/17c1c882-64aa-443d-ada5-7295be37bfa1" />
 
-```python
-from logview.utils import LogViewBuilder
-log = ... #your reading logic for log files using pm4py
-log_view = LogViewBuilder.build_log_view(log)
 
-from logview.predicate import *
-query = Query('my_query', [EqToConstant('Activity', 'Send for Credit Collection')])
-result_set_query, complement_query = log_view.evaluate_query('traces_with_scc', log, query)
-```
-_For more detailed examples, please refer to our *Notbooks* section and folder_
 
 <!-- NOTEBOOKS -->
 ## Notebooks
-For a detailed tutorial on how to use LogView and a case study on a real-life event log, please refer to the examples in our directory [notebooks](https://github.com/blindreview-logview123/logview/tree/main/notebooks)
 
+For a detailed tutorial on how to use QueryBuilder and a case study on a real-life event log, please refer to the [velUI.ipynb](https://github.com/divyalekha99/Query_Builder/blob/main/vel/velUi.ipynb) tutorial.
+ _please refer to our *Notbooks* section and folder to understand logview framework_
 
 <!-- CONTRIBUTING -->
 ## Contributing
